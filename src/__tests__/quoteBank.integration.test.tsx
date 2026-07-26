@@ -10,7 +10,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { QuoteBankProvider } from '@/src/hooks/useQuoteBank';
 import QuoteBankScreen from '../../app/(tabs)/index';
 import SettingsScreen from '../../app/(tabs)/settings';
-import { AuthorDetail } from '../../app/(tabs)/explore/[authorId]';
+import { AuthorDetail } from '../../app/(tabs)/authors/[authorId]';
 
 beforeEach(async () => { await AsyncStorage.clear(); jest.clearAllMocks(); jest.spyOn(Alert, 'alert').mockImplementation(jest.fn()); });
 afterEach(() => jest.restoreAllMocks());
@@ -21,7 +21,7 @@ describe('Quote Bank flows', () => {
     const author = render(<AuthorDetail authorId="einstein" />, { wrapper: Provider });
     await screen.findByText('Albert Einstein');
     fireEvent.press(screen.getByRole('button', { name: /Save Life is like riding/i }));
-    await screen.findByText('Saved to My Bank');
+    await screen.findByText('Remove from My Bank');
     author.unmount();
     render(<QuoteBankScreen />, { wrapper: Provider });
     await waitFor(() => expect(screen.getAllByText(/Life is like riding a bicycle/).length).toBeGreaterThan(0));
@@ -31,7 +31,7 @@ describe('Quote Bank flows', () => {
     const view = render(<AuthorDetail authorId="wilde" />, { wrapper: Provider });
     await screen.findByText('Oscar Wilde');
     fireEvent.press(screen.getByRole('button', { name: /Save Be yourself/i }));
-    await screen.findByText('Saved to My Bank'); view.unmount();
+    await screen.findByText('Remove from My Bank'); view.unmount();
     render(<QuoteBankScreen />, { wrapper: Provider });
     const deleteButton = await screen.findByRole('button', { name: /Delete Be yourself/i }); fireEvent.press(deleteButton);
     await screen.findByText('Your quote bank is empty');
@@ -40,8 +40,9 @@ describe('Quote Bank flows', () => {
   it('changes delivery time and updates the scheduled notification trigger', async () => {
     render(<SettingsScreen />, { wrapper: Provider });
     await screen.findByText('Daily delivery');
-    fireEvent.changeText(screen.getByLabelText('Notification hour'), '16');
+    fireEvent.changeText(screen.getByLabelText('Notification hour'), '4');
     fireEvent.changeText(screen.getByLabelText('Notification minute'), '45');
+    fireEvent.press(screen.getByRole('button', { name: 'PM' }));
     fireEvent.press(screen.getByRole('button', { name: 'Save notification time' }));
     await waitFor(() => expect(Notifications.scheduleNotificationAsync).toHaveBeenLastCalledWith(expect.objectContaining({ trigger: expect.objectContaining({ hour: 16, minute: 45 }) })));
   });
