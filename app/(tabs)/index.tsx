@@ -1,0 +1,11 @@
+import { ActivityIndicator, FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
+import { QuoteCard } from '@/src/components/QuoteCard';
+import { useQuoteBank } from '@/src/hooks/useQuoteBank';
+
+export default function QuoteBankScreen(): JSX.Element {
+  const { quotes, quoteOfDay, loading, removeQuote, refreshQuoteOfDay } = useQuoteBank();
+  if (loading) return <View style={styles.center}><ActivityIndicator /></View>;
+  return <View style={styles.page}><View style={styles.banner}><Text style={styles.kicker}>QUOTE OF THE DAY</Text><Text style={styles.bannerQuote}>{quoteOfDay ? `“${quoteOfDay.text}”` : 'No quotes saved!'}</Text>{quoteOfDay ? <Text style={styles.bannerAuthor}>— {quoteOfDay.authorName}</Text> : <Text style={styles.bannerAuthor}>Save one from Explore to start your daily cycle.</Text>}<Pressable accessibilityRole="button" onPress={() => void refreshQuoteOfDay()}><Text style={styles.next}>Show next quote</Text></Pressable></View>
+    <Text style={styles.heading}>My saved quotes</Text>{quotes.length === 0 ? <View style={styles.empty}><Text style={styles.emptyTitle}>Your quote bank is empty</Text><Text style={styles.emptyText}>Explore authors and save the words you want to revisit.</Text></View> : <FlatList data={quotes} keyExtractor={(item) => item.id} renderItem={({ item }) => <QuoteCard quote={item} onDelete={() => void removeQuote(item.id)} />} />}</View>;
+}
+const styles = StyleSheet.create({ page: { flex: 1, backgroundColor: '#f5f7fa', padding: 16 }, center: { flex: 1, alignItems: 'center', justifyContent: 'center' }, banner: { backgroundColor: '#2f4858', borderRadius: 16, padding: 20, marginBottom: 20 }, kicker: { fontWeight: '800', color: '#b9e3dc', fontSize: 12, letterSpacing: 1 }, bannerQuote: { color: '#fff', fontSize: 20, lineHeight: 29, marginTop: 9, fontWeight: '600' }, bannerAuthor: { color: '#d7e5e8', marginTop: 9 }, next: { color: '#b9e3dc', marginTop: 16, fontWeight: '700' }, heading: { fontSize: 22, fontWeight: '800', marginBottom: 12, color: '#263238' }, empty: { alignItems: 'center', padding: 30, backgroundColor: '#fff', borderRadius: 14 }, emptyTitle: { fontSize: 18, fontWeight: '700' }, emptyText: { color: '#607d8b', textAlign: 'center', marginTop: 8, lineHeight: 21 } });
