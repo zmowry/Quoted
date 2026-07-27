@@ -1,9 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { AdditionalQuotesSettings, NotificationTime, QueueState, Quote } from '@/src/types';
+import type { AdditionalQuotesSettings, Collection, NotificationTime, QueueState, Quote } from '@/src/types';
 
 const DEFAULT_EXTRA: AdditionalQuotesSettings = { enabled: false, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 0 }, { hour: 6, minute: 0 }, { hour: 15, minute: 0 }, { hour: 18, minute: 0 }] };
 
-const KEYS = { quotes: '@quote-bank/quotes', queue: '@quote-bank/queue', time: '@quote-bank/time', extra: '@quote-bank/extra-quotes' } as const;
+const KEYS = { quotes: '@quote-bank/quotes', queue: '@quote-bank/queue', time: '@quote-bank/time', extra: '@quote-bank/extra-quotes', collections: '@quote-bank/collections' } as const;
 const read = async <T,>(key: string, fallback: T): Promise<T> => { const raw = await AsyncStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; };
 
 export const quoteStorage = {
@@ -16,4 +16,6 @@ export const quoteStorage = {
   async setNotificationTime(time: NotificationTime): Promise<void> { await AsyncStorage.setItem(KEYS.time, JSON.stringify(time)); },
   async getAdditionalQuotes(): Promise<AdditionalQuotesSettings> { return read(KEYS.extra, DEFAULT_EXTRA); },
   async setAdditionalQuotes(settings: AdditionalQuotesSettings): Promise<void> { await AsyncStorage.setItem(KEYS.extra, JSON.stringify(settings)); },
+  async getCollections(): Promise<Collection[]> { return read(KEYS.collections, []); },
+  async setCollections(collections: Collection[]): Promise<void> { await AsyncStorage.setItem(KEYS.collections, JSON.stringify(collections)); },
 };

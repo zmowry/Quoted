@@ -4,21 +4,27 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
 import { shareAsync } from 'expo-sharing';
+import * as Clipboard from 'expo-clipboard';
 import { QuoteCard } from '@/src/components/QuoteCard';
+import { CollectionModal } from '@/src/components/CollectionModal';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { Colors } from '@/src/theme';
+import type { Quote } from '@/src/types';
 import { authorPhotos } from '@/src/data/authorPhotos';
 
 type AuthorGroup = { id: string; authorName: string };
 
 export default function QuoteBankScreen(): JSX.Element {
-  const { quotes, quoteOfDay, loading, removeQuote } = useQuoteBank();
+  const { quotes, quoteOfDay, loading, removeQuote, collections, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection } = useQuoteBank();
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const router = useRouter();
   const [viewMode, setViewMode] = useState<'random' | 'author'>('random');
+  const [activeCollection, setActiveCollection] = useState<string | null>(null);
+  const [taggedQuote, setTaggedQuote] = useState<Quote | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [copied, setCopied] = useState(false);
   const bannerRef = useRef<View>(null);
 
   const authorGroups = useMemo<AuthorGroup[]>(() => {
@@ -29,17 +35,19 @@ export default function QuoteBankScreen(): JSX.Element {
     return Array.from(seen.values()).sort((a, b) => a.authorName.localeCompare(b.authorName));
   }, [quotes]);
 
+  const filteredQuotes = useMemo(() => {
+    if (!activeCollection) return quotes;
+    const col = collections.find((c) => c.id === activeCollection);
+    return col ? quotes.filter((q) => col.quoteIds.includes(q.id)) : quotes;
+  }, [quotes, collections, activeCollection]);
+
   const shareQuote = async (): Promise<void> => {
     if (!bannerRef.current || sharing) return;
     try {
       setSharing(true);
       const uri = await captureRef(bannerRef, { format: 'png', quality: 1 });
       await shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share your quote' });
-    } catch {
-      // share cancelled or unavailable — silently ignore
-    } finally {
-      setSharing(false);
-    }
+    } catch { } finally { setSharing(false); }
   };
 
   if (loading) return <View style={styles.center}><ActivityIndicator /></View>;
@@ -60,25 +68,47 @@ export default function QuoteBankScreen(): JSX.Element {
         ) : null}
       </View>
       {quoteOfDay ? (
-        <Pressable accessibilityRole="button" onPress={() => void shareQuote()} style={styles.shareRow} disabled={sharing}>
-          <Ionicons name="share-outline" size={13} color={colors.mutedChocolate} />
-          <Text style={styles.shareText}>{sharing ? 'Preparing...' : 'Share quote'}</Text>
-        </Pressable>
+        <View style={styles.bannerActions}>
+          <Pressable accessibilityRole="button" onPress={() => void shareQuote()} style={styles.bannerActionBtn} disabled={sharing}>
+            <Ionicons name="share-outline" size={13} color={colors.mutedChocolate} />
+            <Text style={styles.shareText}>{sharing ? 'Preparing...' : 'Share quote'}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={async () => { await Clipboard.setStringAsync(quoteOfDay.text); setCopied(true); setTimeout(() => setCopied(false), 1500); }} style={styles.bannerActionBtn}>
+            <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={13} color={copied ? colors.caramel : colors.mutedChocolate} />
+            <Text style={[styles.shareText, copied && { color: colors.caramel }]}>{copied ? 'Copied!' : 'Copy quote'}</Text>
+          </Pressable>
+        </View>
       ) : null}
     </View>
   );
 
+  const collectionChips = (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsContent}>
+      <Pressable onPress={() => setActiveCollection(null)} style={[styles.chip, activeCollection === null && styles.chipActive]}>
+        <Text style={[styles.chipText, activeCollection === null && styles.chipTextActive]}>All</Text>
+      </Pressable>
+      {collections.map((col) => (
+        <Pressable key={col.id} onPress={() => setActiveCollection(activeCollection === col.id ? null : col.id)} style={[styles.chip, activeCollection === col.id && styles.chipActive]}>
+          <Text style={[styles.chipText, activeCollection === col.id && styles.chipTextActive]}>{col.name}</Text>
+        </Pressable>
+      ))}
+    </ScrollView>
+  );
+
   const headingRow = (
-    <View style={styles.headingRow}>
-      <Text style={styles.heading}>My saved quotes</Text>
-      <View style={styles.toggle}>
-        <Pressable onPress={() => setViewMode('random')} style={[styles.toggleBtn, viewMode === 'random' && styles.toggleActive]}>
-          <Ionicons name="shuffle" size={15} color={viewMode === 'random' ? colors.white : colors.mutedChocolate} />
-        </Pressable>
-        <Pressable onPress={() => setViewMode('author')} style={[styles.toggleBtn, viewMode === 'author' && styles.toggleActive]}>
-          <Ionicons name="people" size={15} color={viewMode === 'author' ? colors.white : colors.mutedChocolate} />
-        </Pressable>
+    <View>
+      <View style={styles.headingRow}>
+        <Text style={styles.heading}>My saved quotes</Text>
+        <View style={styles.toggle}>
+          <Pressable onPress={() => setViewMode('random')} style={[styles.toggleBtn, viewMode === 'random' && styles.toggleActive]}>
+            <Ionicons name="shuffle" size={15} color={viewMode === 'random' ? colors.white : colors.mutedChocolate} />
+          </Pressable>
+          <Pressable onPress={() => setViewMode('author')} style={[styles.toggleBtn, viewMode === 'author' && styles.toggleActive]}>
+            <Ionicons name="people" size={15} color={viewMode === 'author' ? colors.white : colors.mutedChocolate} />
+          </Pressable>
+        </View>
       </View>
+      {collectionChips}
     </View>
   );
 
@@ -105,24 +135,47 @@ export default function QuoteBankScreen(): JSX.Element {
         keyExtractor={(item) => item.id}
         ListHeaderComponent={header}
         renderItem={({ item }) => (
-          <View style={styles.authorCard}>
+          <Pressable style={styles.authorCard} onPress={() => router.push(`/authors/${item.id}`)}>
             {authorPhotos[item.id] ? <Image source={authorPhotos[item.id]} style={styles.authorCardPhoto} /> : null}
             <Text style={styles.authorCardName}>{item.authorName}</Text>
-          </View>
+          </Pressable>
         )}
       />
     );
   }
 
   return (
-    <FlatList
-      style={styles.scroll}
-      contentContainerStyle={styles.page}
-      data={quotes}
-      keyExtractor={(item) => item.id}
-      ListHeaderComponent={header}
-      renderItem={({ item }) => <QuoteCard quote={item} onDelete={() => void removeQuote(item.id)} />}
-    />
+    <>
+      <FlatList
+        style={styles.scroll}
+        contentContainerStyle={styles.page}
+        data={filteredQuotes}
+        keyExtractor={(item) => item.id}
+        ListHeaderComponent={header}
+        ListEmptyComponent={
+          <View style={styles.empty}>
+            <Text style={styles.emptyTitle}>No quotes in this collection</Text>
+            <Text style={styles.emptyText}>Tap the bookmark icon on any saved quote to add it here.</Text>
+          </View>
+        }
+        renderItem={({ item }) => (
+          <QuoteCard
+            quote={item}
+            onDelete={() => void removeQuote(item.id)}
+            onTag={() => setTaggedQuote(item)}
+          />
+        )}
+      />
+      <CollectionModal
+        quote={taggedQuote}
+        collections={collections}
+        onClose={() => setTaggedQuote(null)}
+        onAdd={(colId) => void addQuoteToCollection(taggedQuote!.id, colId)}
+        onRemove={(colId) => void removeQuoteFromCollection(taggedQuote!.id, colId)}
+        onNew={(name) => void addCollection(name)}
+        onDelete={(colId) => { void deleteCollection(colId); if (activeCollection === colId) setActiveCollection(null); }}
+      />
+    </>
   );
 }
 
@@ -138,13 +191,21 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     moreRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 },
     moreText: { color: colors.gold, fontWeight: '800', fontSize: scale(14) },
     authorPhoto: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: colors.gold },
-    shareRow: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 4, marginBottom: 14 },
+    shareRow: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 4, marginBottom: 6 },
     shareText: { fontSize: scale(12), color: colors.mutedChocolate, fontWeight: '600' },
-    headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
+    bannerActions: { flexDirection: 'row', alignItems: 'center', gap: 16, alignSelf: 'flex-end', marginTop: 8, marginBottom: 6 },
+    bannerActionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 4 },
+    headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
     heading: { fontSize: scale(22), fontWeight: '800', color: colors.chocolate },
     toggle: { flexDirection: 'row', backgroundColor: colors.border, borderRadius: 8, padding: 2, gap: 2 },
     toggleBtn: { padding: 6, borderRadius: 6 },
     toggleActive: { backgroundColor: colors.chocolate },
+    chipsScroll: { marginBottom: 12 },
+    chipsContent: { flexDirection: 'row', gap: 7, paddingRight: 4 },
+    chip: { paddingVertical: 5, paddingHorizontal: 12, borderRadius: 20, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
+    chipActive: { backgroundColor: colors.chocolate, borderColor: colors.chocolate },
+    chipText: { fontSize: scale(12), fontWeight: '700', color: colors.mutedChocolate },
+    chipTextActive: { color: colors.white },
     authorCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: colors.white, borderRadius: 12, padding: 12, marginBottom: 8, borderWidth: 1, borderColor: colors.border, shadowColor: colors.chocolate, shadowOpacity: .08, shadowRadius: 6, elevation: 2, gap: 14 },
     authorCardPhoto: { width: 48, height: 48, borderRadius: 24 },
     authorCardName: { fontSize: scale(16), fontWeight: '700', color: colors.chocolate },

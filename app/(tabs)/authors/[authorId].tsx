@@ -1,12 +1,29 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Image, ScrollView, StyleSheet, Text, Pressable, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import * as Clipboard from 'expo-clipboard';
 import { authorById } from '@/src/data/authorsData';
 import { authorPhotos } from '@/src/data/authorPhotos';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { Colors } from '@/src/theme';
 import type { Quote } from '@/src/types';
+
+function CopyButton({ text }: { text: string }): JSX.Element {
+  const { colors } = useTheme();
+  const [copied, setCopied] = useState(false);
+  const handleCopy = async (): Promise<void> => {
+    await Clipboard.setStringAsync(text);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
+  return (
+    <Pressable onPress={() => void handleCopy()} accessibilityLabel="Copy quote" style={{ padding: 4 }}>
+      <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={15} color={copied ? colors.caramel : colors.taupe} />
+    </Pressable>
+  );
+}
 
 export function AuthorDetail({ authorId }: { authorId: string }): JSX.Element {
   const { colors, scale } = useTheme();
@@ -39,7 +56,10 @@ export function AuthorDetail({ authorId }: { authorId: string }): JSX.Element {
         const saved = quotes.some((item) => item.id === quote.id);
         return (
           <View key={quote.id} style={styles.quoteCard}>
-            <Text style={styles.quote}>"{quote.text}"</Text>
+            <View style={styles.quoteRow}>
+              <Text style={[styles.quote, { flex: 1 }]}>"{quote.text}"</Text>
+              <CopyButton text={quote.text} />
+            </View>
             <Pressable accessibilityRole="button" accessibilityLabel={saved ? `Remove ${quote.text}` : `Save ${quote.text}`} style={[styles.save, saved && styles.remove]} onPress={() => void (saved ? removeQuote(quote.id) : saveQuote(quote))}>
               <Text style={styles.saveText}>{saved ? 'Remove from My Bank' : '+ Save to My Bank'}</Text>
             </Pressable>
@@ -69,6 +89,7 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     photoPlaceholder: { backgroundColor: colors.taupe, alignItems: 'center', justifyContent: 'center' },
     photoInitial: { color: colors.white, fontSize: scale(28), fontWeight: '800' },
     quoteCard: { backgroundColor: colors.white, borderRadius: 12, borderColor: colors.border, borderWidth: 1, padding: 12, marginBottom: 10 },
+    quoteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
     quote: { fontSize: scale(14), lineHeight: scale(20), color: colors.chocolate },
     save: { alignSelf: 'flex-start', marginTop: 10, backgroundColor: colors.caramel, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 7 },
     remove: { backgroundColor: colors.burntCaramel },
