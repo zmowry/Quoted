@@ -1,7 +1,9 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
+import { captureRef } from 'react-native-view-shot';
+import { shareAsync } from 'expo-sharing';
 import { QuoteCard } from '@/src/components/QuoteCard';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
@@ -16,6 +18,8 @@ export default function QuoteBankScreen(): JSX.Element {
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const router = useRouter();
   const [viewMode, setViewMode] = useState<'random' | 'author'>('random');
+  const [sharing, setSharing] = useState(false);
+  const bannerRef = useRef<View>(null);
 
   const authorGroups = useMemo<AuthorGroup[]>(() => {
     const seen = new Map<string, AuthorGroup>();
@@ -25,19 +29,40 @@ export default function QuoteBankScreen(): JSX.Element {
     return Array.from(seen.values()).sort((a, b) => a.authorName.localeCompare(b.authorName));
   }, [quotes]);
 
+  const shareQuote = async (): Promise<void> => {
+    if (!bannerRef.current || sharing) return;
+    try {
+      setSharing(true);
+      const uri = await captureRef(bannerRef, { format: 'png', quality: 1 });
+      await shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share your quote' });
+    } catch {
+      // share cancelled or unavailable — silently ignore
+    } finally {
+      setSharing(false);
+    }
+  };
+
   if (loading) return <View style={styles.center}><ActivityIndicator /></View>;
 
   const banner = (
-    <View style={styles.banner}>
-      <Text style={styles.kicker}>QUOTE OF THE DAY</Text>
-      <Text style={styles.bannerQuote}>{quoteOfDay ? `\u201C${quoteOfDay.text}\u201D` : 'No quotes saved!'}</Text>
-      {quoteOfDay
-        ? <Text style={styles.bannerAuthor}>{quoteOfDay.authorName}</Text>
-        : <Text style={styles.bannerAuthor}>Save one from Explore to start your daily cycle.</Text>}
+    <View>
+      <View ref={bannerRef} style={styles.banner} collapsable={false}>
+        <Text style={styles.kicker}>QUOTE OF THE DAY</Text>
+        <Text style={styles.bannerQuote}>{quoteOfDay ? `\u201C${quoteOfDay.text}\u201D` : 'No quotes saved!'}</Text>
+        {quoteOfDay
+          ? <Text style={styles.bannerAuthor}>{quoteOfDay.authorName}</Text>
+          : <Text style={styles.bannerAuthor}>Save one from Explore to start your daily cycle.</Text>}
+        {quoteOfDay ? (
+          <Pressable accessibilityRole="button" onPress={() => router.push(`/authors/${quoteOfDay.authorId}`)} style={styles.moreRow}>
+            <Text style={styles.moreText}>More from this author</Text>
+            {authorPhotos[quoteOfDay.authorId] ? <Image source={authorPhotos[quoteOfDay.authorId]} style={styles.authorPhoto} /> : null}
+          </Pressable>
+        ) : null}
+      </View>
       {quoteOfDay ? (
-        <Pressable accessibilityRole="button" onPress={() => router.push(`/authors/${quoteOfDay.authorId}`)} style={styles.moreRow}>
-          <Text style={styles.moreText}>More from this author</Text>
-          {authorPhotos[quoteOfDay.authorId] ? <Image source={authorPhotos[quoteOfDay.authorId]} style={styles.authorPhoto} /> : null}
+        <Pressable accessibilityRole="button" onPress={() => void shareQuote()} style={styles.shareRow} disabled={sharing}>
+          <Ionicons name="share-outline" size={13} color={colors.mutedChocolate} />
+          <Text style={styles.shareText}>{sharing ? 'Preparing...' : 'Share quote'}</Text>
         </Pressable>
       ) : null}
     </View>
@@ -106,13 +131,15 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     scroll: { flex: 1, backgroundColor: colors.cream },
     page: { padding: 16 },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cream },
-    banner: { backgroundColor: colors.chocolate, borderRadius: 20, padding: 22, marginBottom: 20, shadowColor: colors.chocolate, shadowOpacity: .18, shadowRadius: 12, elevation: 4 },
+    banner: { backgroundColor: colors.chocolate, borderRadius: 20, padding: 22, shadowColor: colors.chocolate, shadowOpacity: .18, shadowRadius: 12, elevation: 4 },
     kicker: { fontWeight: '800', color: colors.gold, fontSize: scale(12), letterSpacing: 1.2 },
     bannerQuote: { color: colors.white, fontSize: scale(20), lineHeight: scale(29), marginTop: 9, fontWeight: '600' },
     bannerAuthor: { color: colors.softCream, marginTop: 9, fontSize: scale(14) },
     moreRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 },
     moreText: { color: colors.gold, fontWeight: '800', fontSize: scale(14) },
     authorPhoto: { width: 48, height: 48, borderRadius: 24, borderWidth: 2, borderColor: colors.gold },
+    shareRow: { flexDirection: 'row', alignItems: 'center', gap: 5, alignSelf: 'flex-end', paddingVertical: 6, paddingHorizontal: 4, marginBottom: 14 },
+    shareText: { fontSize: scale(12), color: colors.mutedChocolate, fontWeight: '600' },
     headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
     heading: { fontSize: scale(22), fontWeight: '800', color: colors.chocolate },
     toggle: { flexDirection: 'row', backgroundColor: colors.border, borderRadius: 8, padding: 2, gap: 2 },
