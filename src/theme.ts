@@ -1,4 +1,5 @@
-export type ThemeMode = 'light' | 'dark';
+/** The user's preference. 'system' defers to the OS appearance at render time. */
+export type ThemeMode = 'light' | 'dark' | 'system';
 
 export const lightColors = {
   cream: '#FFF8ED',

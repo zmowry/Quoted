@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { flushPending, renderWithProviders } from '@/src/test-utils';
+import { STORAGE_KEYS } from '@/src/services/storage';
 import SettingsScreen from '../../app/(tabs)/settings';
 
 beforeEach(async () => { await AsyncStorage.clear(); jest.clearAllMocks(); jest.spyOn(Alert, 'alert').mockImplementation(jest.fn()); });
@@ -15,9 +16,73 @@ const openSettings = async () => {
   await screen.findByText('Daily delivery');
 };
 
+// Cards are collapsed by default; expand the ones a test needs to interact with.
+const expandCard = (title: string) => fireEvent.press(screen.getByText(title));
+
+// jest.setup reports 'granted'. Overriding replaces that implementation for good,
+// so every test that changes it restores the default afterwards.
+const setPermissionStatus = (status: 'granted' | 'denied' | 'undetermined'): void => {
+  jest.mocked(Notifications.getPermissionsAsync).mockResolvedValue(
+    { status } as unknown as Notifications.NotificationPermissionsStatus,
+  );
+};
+
+describe('Notification permission', () => {
+  afterEach(() => setPermissionStatus('granted'));
+
+  it('stays quiet when notifications are already granted', async () => {
+    await openSettings();
+    expect(screen.queryByText('Notifications are turned off')).toBeNull();
+  });
+
+  it('warns and offers system settings when notifications are denied', async () => {
+    setPermissionStatus('denied');
+    await openSettings();
+    // The warning must be reachable without expanding anything, since every card
+    // starts collapsed.
+    await screen.findByText('Notifications are turned off');
+    expect(screen.getByText(/cannot deliver quotes/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Open settings' })).toBeTruthy();
+  });
+
+  it('requests permission when it has never been asked for', async () => {
+    setPermissionStatus('undetermined');
+    await openSettings();
+    fireEvent.press(await screen.findByRole('button', { name: 'Allow' }));
+    await waitFor(() => expect(Notifications.requestPermissionsAsync).toHaveBeenCalled());
+    // Granting clears the warning without needing a reload.
+    await waitFor(() => expect(screen.queryByText('Notifications are turned off')).toBeNull());
+  });
+});
+
 describe('Display settings', () => {
+  it('collapses every card by default', async () => {
+    await openSettings();
+    expect(screen.queryByText('Choose when your daily quote notification should arrive.')).toBeNull();
+    expect(screen.queryByText('Light')).toBeNull();
+    expect(screen.queryByText('Large')).toBeNull();
+  });
+
+  it('follows the device appearance until the user picks a mode', async () => {
+    await openSettings();
+    expandCard('Display mode');
+    expect(screen.getByText(/Following your device appearance/)).toBeTruthy();
+  });
+
+  it('persists the system option', async () => {
+    await openSettings();
+    expandCard('Display mode');
+    fireEvent.press(screen.getByText('Dark'));
+    await waitFor(async () => expect(await AsyncStorage.getItem('@quote-bank/theme')).toBe('dark'));
+    // Returning to System must be storable, not just the initial state.
+    fireEvent.press(screen.getByText('System'));
+    await waitFor(async () => expect(await AsyncStorage.getItem('@quote-bank/theme')).toBe('system'));
+    expect(screen.getByText(/Following your device appearance/)).toBeTruthy();
+  });
+
   it('persists the selected display mode', async () => {
     await openSettings();
+    expandCard('Display mode');
     fireEvent.press(screen.getByText('Dark'));
     await waitFor(async () => expect(await AsyncStorage.getItem('@quote-bank/theme')).toBe('dark'));
 
@@ -27,6 +92,7 @@ describe('Display settings', () => {
 
   it('persists the selected text size', async () => {
     await openSettings();
+    expandCard('Text size');
     fireEvent.press(screen.getByText('Large'));
     await waitFor(async () => expect(await AsyncStorage.getItem('@quote-bank/text-size')).toBe('large'));
   });
@@ -35,6 +101,7 @@ describe('Display settings', () => {
     await AsyncStorage.setItem('@quote-bank/theme', 'dark');
     await AsyncStorage.setItem('@quote-bank/text-size', 'small');
     await openSettings();
+    expandCard('Text size');
     // A restored preference is reflected without the user touching anything.
     await waitFor(async () => expect(await AsyncStorage.getItem('@quote-bank/theme')).toBe('dark'));
     expect(screen.getByText('Small')).toBeTruthy();
@@ -42,17 +109,103 @@ describe('Display settings', () => {
 
   it('collapses and expands a settings section', async () => {
     await openSettings();
-    expect(screen.getByText('Choose when your daily quote notification should arrive.')).toBeTruthy();
-    fireEvent.press(screen.getByText('Daily delivery'));
-    await waitFor(() => expect(screen.queryByText('Choose when your daily quote notification should arrive.')).toBeNull());
+    expect(screen.queryByText('Choose when your daily quote notification should arrive.')).toBeNull();
     fireEvent.press(screen.getByText('Daily delivery'));
     await screen.findByText('Choose when your daily quote notification should arrive.');
+    fireEvent.press(screen.getByText('Daily delivery'));
+    await waitFor(() => expect(screen.queryByText('Choose when your daily quote notification should arrive.')).toBeNull());
+  });
+});
+
+describe('Clearing all data', () => {
+  // Alert is mocked, so drive the confirmation by invoking the button the dialog
+  // would have shown.
+  const alertButtons = () => {
+    const [, , buttons] = jest.mocked(Alert.alert).mock.calls.at(-1) ?? [];
+    return buttons ?? [];
+  };
+
+  const pressAlertButton = (label: string): void => {
+    const button = alertButtons().find((b) => b.text === label);
+    if (!button) throw new Error(`No "${label}" button in the alert`);
+    // Cancel carries no handler by design; pressing it must simply do nothing.
+    button.onPress?.();
+  };
+
+  const seedData = async (): Promise<void> => {
+    await AsyncStorage.setItem(STORAGE_KEYS.quotes, JSON.stringify([
+      { id: 'q1', text: 'A saved quote', authorId: 'woolf', authorName: 'Virginia Woolf' },
+    ]));
+    await AsyncStorage.setItem(STORAGE_KEYS.collections, JSON.stringify([{ id: 'c1', name: 'Favourites', quoteIds: ['q1'] }]));
+    await AsyncStorage.setItem(STORAGE_KEYS.theme, 'dark');
+    await AsyncStorage.setItem(STORAGE_KEYS.textSize, 'large');
+  };
+
+  it('asks for confirmation before deleting anything', async () => {
+    await seedData();
+    await openSettings();
+    expandCard('Your data');
+    fireEvent.press(screen.getByRole('button', { name: /Clear all data/ }));
+
+    expect(Alert.alert).toHaveBeenCalledWith('Clear all data?', expect.stringContaining('cannot be undone'), expect.any(Array));
+    // An escape hatch must exist, and the delete must be marked destructive so the
+    // platform renders it in red rather than as a neutral default action.
+    expect(alertButtons().find((b) => b.text === 'Cancel')?.style).toBe('cancel');
+    expect(alertButtons().find((b) => b.text === 'Delete everything')?.style).toBe('destructive');
+
+    // Nothing is destroyed until the destructive button is chosen.
+    expect(await AsyncStorage.getItem(STORAGE_KEYS.quotes)).toBeTruthy();
+
+    pressAlertButton('Cancel');
+    expect(await AsyncStorage.getItem(STORAGE_KEYS.quotes)).toBeTruthy();
+  });
+
+  it('erases every key the app owns, including theme preferences', async () => {
+    await seedData();
+    await openSettings();
+    expandCard('Your data');
+    fireEvent.press(screen.getByRole('button', { name: /Clear all data/ }));
+    pressAlertButton('Delete everything');
+
+    await waitFor(async () => expect(await AsyncStorage.getItem(STORAGE_KEYS.quotes)).toBeNull());
+    // Theme and text size live outside quoteStorage and are the easy ones to miss.
+    for (const key of Object.values(STORAGE_KEYS)) {
+      expect(await AsyncStorage.getItem(key)).toBeNull();
+    }
+  });
+
+  it('cancels queued notifications so deleted quotes cannot still be delivered', async () => {
+    await seedData();
+    await openSettings();
+    expandCard('Your data');
+    jest.clearAllMocks();
+    jest.spyOn(Alert, 'alert').mockImplementation(jest.fn());
+
+    fireEvent.press(screen.getByRole('button', { name: /Clear all data/ }));
+    pressAlertButton('Delete everything');
+
+    // The OS holds a copy of the quote text; wiping storage alone would leave it
+    // on the lock screen after the user erased it.
+    await waitFor(() => expect(Notifications.cancelAllScheduledNotificationsAsync).toHaveBeenCalled());
+  });
+
+  it('leaves AsyncStorage belonging to other libraries untouched', async () => {
+    await AsyncStorage.setItem('@some-other-lib/session', 'keep-me');
+    await seedData();
+    await openSettings();
+    expandCard('Your data');
+    fireEvent.press(screen.getByRole('button', { name: /Clear all data/ }));
+    pressAlertButton('Delete everything');
+
+    await waitFor(async () => expect(await AsyncStorage.getItem(STORAGE_KEYS.quotes)).toBeNull());
+    expect(await AsyncStorage.getItem('@some-other-lib/session')).toBe('keep-me');
   });
 });
 
 describe('Daily delivery time', () => {
   it('converts a 12-hour AM entry to the correct 24-hour trigger', async () => {
     await openSettings();
+    expandCard('Daily delivery');
     fireEvent.changeText(screen.getByLabelText('Notification hour'), '12');
     fireEvent.changeText(screen.getByLabelText('Notification minute'), '05');
     fireEvent.press(screen.getByRole('button', { name: 'AM' }));
@@ -65,6 +218,7 @@ describe('Daily delivery time', () => {
 
   it('persists the delivery time across a remount', async () => {
     await openSettings();
+    expandCard('Daily delivery');
     fireEvent.changeText(screen.getByLabelText('Notification hour'), '6');
     fireEvent.changeText(screen.getByLabelText('Notification minute'), '30');
     fireEvent.press(screen.getByRole('button', { name: 'AM' }));
@@ -74,12 +228,14 @@ describe('Daily delivery time', () => {
 
     screen.unmount();
     await openSettings();
+    expandCard('Daily delivery');
     await waitFor(() => expect(screen.getByLabelText('Notification hour').props.value).toBe('6'));
     expect(screen.getByLabelText('Notification minute').props.value).toBe('30');
   });
 
   it('rejects a minute above 59 without scheduling', async () => {
     await openSettings();
+    expandCard('Daily delivery');
     jest.clearAllMocks();
     fireEvent.changeText(screen.getByLabelText('Notification minute'), '75');
     fireEvent.press(screen.getByRole('button', { name: 'Save notification time' }));
@@ -89,6 +245,7 @@ describe('Daily delivery time', () => {
 
   it('rejects a non-numeric hour without scheduling', async () => {
     await openSettings();
+    expandCard('Daily delivery');
     jest.clearAllMocks();
     fireEvent.changeText(screen.getByLabelText('Notification hour'), 'abc');
     fireEvent.press(screen.getByRole('button', { name: 'Save notification time' }));
@@ -100,6 +257,7 @@ describe('Daily delivery time', () => {
 describe('Additional quotes per day', () => {
   it('reveals count and time pickers only after opting in', async () => {
     await openSettings();
+    expandCard('More quotes per day');
     expect(screen.queryByText('How many additional quotes?')).toBeNull();
     fireEvent.press(screen.getByText('Yes'));
     await screen.findByText('How many additional quotes?');
@@ -108,6 +266,7 @@ describe('Additional quotes per day', () => {
 
   it('shows one time slot per selected count', async () => {
     await openSettings();
+    expandCard('More quotes per day');
     fireEvent.press(screen.getByText('Yes'));
     await screen.findByText('How many additional quotes?');
 
@@ -120,6 +279,7 @@ describe('Additional quotes per day', () => {
 
   it('persists the opt-in and schedules the extra notifications', async () => {
     await openSettings();
+    expandCard('More quotes per day');
     fireEvent.press(screen.getByText('Yes'));
     await screen.findByText('How many additional quotes?');
     fireEvent.press(screen.getByText('2'));
@@ -138,6 +298,7 @@ describe('Additional quotes per day', () => {
       enabled: true, count: 1, times: [{ hour: 13, minute: 15 }],
     }));
     await openSettings();
+    expandCard('More quotes per day');
     await screen.findByText('How many additional quotes?');
     expect(screen.getByText('Quote 2')).toBeTruthy();
   });
@@ -150,6 +311,7 @@ describe('Additional quotes per day', () => {
       enabled: false, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 0 }],
     }));
     await openSettings();
+    expandCard('More quotes per day');
 
     fireEvent.press(screen.getByText('Yes'));
     await screen.findByText('How many additional quotes?');
@@ -161,6 +323,7 @@ describe('Additional quotes per day', () => {
 
   it('rejects an invalid extra time without saving', async () => {
     await openSettings();
+    expandCard('More quotes per day');
     fireEvent.press(screen.getByText('Yes'));
     await screen.findByText('How many additional quotes?');
     fireEvent.changeText(screen.getByLabelText('Extra quote 1 hour'), '44');

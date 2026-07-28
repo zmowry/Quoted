@@ -19,6 +19,21 @@ async function ensurePermission(): Promise<boolean> {
   }
 }
 
+/**
+ * Drops every pending notification.
+ *
+ * Scheduled notifications hold a copy of the quote text in the OS, outside our
+ * storage. Wiping AsyncStorage alone would leave those queued, so the user's
+ * quotes would keep appearing on the lock screen after they erased them.
+ */
+export async function cancelAllNotifications(): Promise<void> {
+  try {
+    await Notifications.cancelAllScheduledNotificationsAsync();
+  } catch {
+    // Nothing actionable for the user; the data wipe itself still proceeds.
+  }
+}
+
 export async function scheduleAllNotifications(
   mainTime: NotificationTime,
   mainQuote: Quote | undefined,

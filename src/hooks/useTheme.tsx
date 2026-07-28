@@ -1,17 +1,23 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { PropsWithChildren, ReactElement } from 'react';
+import { useColorScheme } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { STORAGE_KEYS } from '@/src/services/storage';
 import { lightColors, darkColors } from '@/src/theme';
 import type { Colors, ThemeMode } from '@/src/theme';
 
 export type TextSize = 'small' | 'medium' | 'large';
 const TEXT_SCALES: Record<TextSize, number> = { small: 0.85, medium: 1, large: 1.2 };
-const THEME_KEY = '@quote-bank/theme';
-const TEXT_SIZE_KEY = '@quote-bank/text-size';
+const THEME_KEY = STORAGE_KEYS.theme;
+const TEXT_SIZE_KEY = STORAGE_KEYS.textSize;
+const isMode = (v: string | null): v is ThemeMode => v === 'light' || v === 'dark' || v === 'system';
 
 interface ThemeContextValue {
   colors: Colors;
+  /** The stored preference, which may be 'system'. */
   mode: ThemeMode;
+  /** What 'system' actually resolved to — use this to render, not `mode`. */
+  resolvedMode: 'light' | 'dark';
   setMode: (mode: ThemeMode) => Promise<void>;
   textSize: TextSize;
   setTextSize: (size: TextSize) => Promise<void>;
@@ -21,12 +27,15 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 export function ThemeProvider({ children }: PropsWithChildren): ReactElement {
-  const [mode, setModeState] = useState<ThemeMode>('light');
+  const [mode, setModeState] = useState<ThemeMode>('system');
   const [textSize, setTextSizeState] = useState<TextSize>('medium');
+  // Re-renders on its own when the OS appearance flips, so 'system' tracks live.
+  const systemScheme = useColorScheme();
+  const resolvedMode: 'light' | 'dark' = mode === 'system' ? (systemScheme === 'dark' ? 'dark' : 'light') : mode;
 
   useEffect(() => {
     void Promise.all([AsyncStorage.getItem(THEME_KEY), AsyncStorage.getItem(TEXT_SIZE_KEY)]).then(([storedMode, storedSize]) => {
-      if (storedMode === 'dark' || storedMode === 'light') setModeState(storedMode);
+      if (isMode(storedMode)) setModeState(storedMode);
       if (storedSize === 'small' || storedSize === 'medium' || storedSize === 'large') setTextSizeState(storedSize);
     });
   }, []);
@@ -44,7 +53,7 @@ export function ThemeProvider({ children }: PropsWithChildren): ReactElement {
   const scale = useCallback((n: number) => Math.round(n * TEXT_SCALES[textSize]), [textSize]);
 
   return (
-    <ThemeContext.Provider value={{ colors: mode === 'dark' ? darkColors : lightColors, mode, setMode, textSize, setTextSize, scale }}>
+    <ThemeContext.Provider value={{ colors: resolvedMode === 'dark' ? darkColors : lightColors, mode, resolvedMode, setMode, textSize, setTextSize, scale }}>
       {children}
     </ThemeContext.Provider>
   );

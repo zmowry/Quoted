@@ -1,10 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import type { ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import * as Clipboard from 'expo-clipboard';
 import type { Quote } from '@/src/types';
+import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { Colors } from '@/src/theme';
 
@@ -18,13 +18,7 @@ export function QuoteCard({ quote, onDelete, onTag }: Props): ReactElement {
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const router = useRouter();
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async (): Promise<void> => {
-    await Clipboard.setStringAsync(quote.text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
+  const { copied, copy } = useCopyFeedback();
 
   return (
     <View style={styles.card}>
@@ -34,7 +28,7 @@ export function QuoteCard({ quote, onDelete, onTag }: Props): ReactElement {
           <Text style={styles.author}>-- {quote.authorName}</Text>
         </Pressable>
         <View style={styles.actions}>
-          <Pressable onPress={() => void handleCopy()} accessibilityLabel="Copy quote" style={styles.actionBtn}>
+          <Pressable onPress={() => void copy(quote.text)} accessibilityLabel="Copy quote" style={styles.actionBtn}>
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={14} color={copied ? colors.caramel : colors.taupe} />
           </Pressable>
           {onTag ? (

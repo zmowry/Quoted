@@ -81,11 +81,4 @@ describe('Author detail', () => {
     fireEvent.press(screen.getByLabelText(`Remove ${text}`));
     await screen.findByLabelText(`Save ${text}`);
   });
-
-  it('returns to the authors list from the back control', async () => {
-    renderWithProviders(<AuthorDetail authorId="rumi" />);
-    await screen.findByText('Rumi');
-    fireEvent.press(screen.getByText('‹ All Authors'));
-    await waitFor(() => expect(router.replace).toHaveBeenCalledWith('/authors'));
-  });
 });

@@ -40,6 +40,7 @@ describe('Quote Bank flows', () => {
   it('changes delivery time and updates the scheduled notification trigger', async () => {
     renderWithProviders(<SettingsScreen />);
     await screen.findByText('Daily delivery');
+    fireEvent.press(screen.getByText('Daily delivery'));
     fireEvent.changeText(screen.getByLabelText('Notification hour'), '4');
     fireEvent.changeText(screen.getByLabelText('Notification minute'), '45');
     fireEvent.press(screen.getByRole('button', { name: 'PM' }));
@@ -71,6 +72,7 @@ describe('Quote Bank flows', () => {
   it('rejects an out-of-range delivery time and leaves the schedule untouched', async () => {
     renderWithProviders(<SettingsScreen />);
     await screen.findByText('Daily delivery');
+    fireEvent.press(screen.getByText('Daily delivery'));
     jest.clearAllMocks();
     fireEvent.changeText(screen.getByLabelText('Notification hour'), '99');
     fireEvent.press(screen.getByRole('button', { name: 'Save notification time' }));

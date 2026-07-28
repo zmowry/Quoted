@@ -1,9 +1,9 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import type { PropsWithChildren, ReactElement } from 'react';
 import type { AdditionalQuotesSettings, Collection, NotificationTime, Quote, QuoteBankContextValue } from '@/src/types';
-import { quoteStorage } from '@/src/services/storage';
+import { DEFAULT_EXTRA_QUOTES, DEFAULT_NOTIFICATION_TIME, quoteStorage } from '@/src/services/storage';
 import { nextQuoteInCycle, reconcileQueue } from '@/src/services/queueManager';
-import { scheduleAllNotifications } from '@/src/services/notifications';
+import { cancelAllNotifications, scheduleAllNotifications } from '@/src/services/notifications';
 
 const QuoteBankContext = createContext<QuoteBankContextValue | undefined>(undefined);
 
@@ -12,8 +12,8 @@ const uid = () => Math.random().toString(36).slice(2);
 export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [quoteOfDay, setQuoteOfDay] = useState<Quote>();
-  const [notificationTime, setTime] = useState<NotificationTime>({ hour: 9, minute: 0 });
-  const [additionalQuotes, setAdditionalQuotes] = useState<AdditionalQuotesSettings>({ enabled: false, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 0 }, { hour: 6, minute: 0 }, { hour: 15, minute: 0 }, { hour: 18, minute: 0 }] });
+  const [notificationTime, setTime] = useState<NotificationTime>(DEFAULT_NOTIFICATION_TIME);
+  const [additionalQuotes, setAdditionalQuotes] = useState<AdditionalQuotesSettings>(DEFAULT_EXTRA_QUOTES);
   const [collections, setCollections] = useState<Collection[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -51,12 +51,17 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
   const removeQuote = useCallback(async (id: string) => {
     const next = await quoteStorage.deleteQuote(id);
     setQuotes(next); await reconcileQueue(next);
-    const current = next.some((q) => q.id === quoteOfDay?.id) ? quoteOfDay : await nextQuoteInCycle(next);
+    const keptCurrent = next.some((q) => q.id === quoteOfDay?.id);
+    const current = keptCurrent ? quoteOfDay : await nextQuoteInCycle(next);
     setQuoteOfDay(current);
+    // Saving can wait for the next refresh, but a delete cannot: the pending
+    // notification still carries the deleted quote's text and would keep firing
+    // it. Re-point the schedule at the replacement (or the empty-bank fallback).
+    if (!keptCurrent) await scheduleAllNotifications(notificationTime, current, additionalQuotes, next);
     // remove from all collections
     const updated = collections.map((c) => ({ ...c, quoteIds: c.quoteIds.filter((qid) => qid !== id) }));
     setCollections(updated); await quoteStorage.setCollections(updated);
-  }, [quoteOfDay, collections]);
+  }, [quoteOfDay, collections, notificationTime, additionalQuotes]);
 
   const updateNotificationTime = useCallback(async (time: NotificationTime) => {
     await quoteStorage.setNotificationTime(time); setTime(time);
@@ -67,6 +72,16 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
     await quoteStorage.setAdditionalQuotes(settings); setAdditionalQuotes(settings);
     await scheduleAllNotifications(notificationTime, quoteOfDay, settings, quotes);
   }, [notificationTime, quoteOfDay, quotes]);
+
+  const clearAllData = useCallback(async () => {
+    // Cancel first: if the wipe fails partway, we would rather have dropped the
+    // notifications than leave quotes surfacing from a half-erased bank.
+    await cancelAllNotifications();
+    await quoteStorage.clearAll();
+    setQuotes([]); setQuoteOfDay(undefined); setCollections([]);
+    setTime({ hour: 9, minute: 0 });
+    setAdditionalQuotes(DEFAULT_EXTRA_QUOTES);
+  }, []);
 
   const addCollection = useCallback(async (name: string): Promise<Collection> => {
     const col: Collection = { id: uid(), name: name.trim(), quoteIds: [] };
@@ -91,7 +106,7 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
   }, [collections]);
 
   return (
-    <QuoteBankContext.Provider value={{ quotes, quoteOfDay, notificationTime, additionalQuotes, collections, loading, saveQuote, removeQuote, refreshQuoteOfDay, updateNotificationTime, updateAdditionalQuotes, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection }}>
+    <QuoteBankContext.Provider value={{ quotes, quoteOfDay, notificationTime, additionalQuotes, collections, loading, saveQuote, removeQuote, refreshQuoteOfDay, updateNotificationTime, updateAdditionalQuotes, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection, clearAllData }}>
       {children}
     </QuoteBankContext.Provider>
   );

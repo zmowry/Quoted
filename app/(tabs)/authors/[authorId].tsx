@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
-import { router, useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { Image, ScrollView, StyleSheet, Text, Pressable, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import * as Clipboard from 'expo-clipboard';
 import { authorById } from '@/src/data/authorsData';
 import { authorPhotos } from '@/src/data/authorPhotos';
+import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { Colors } from '@/src/theme';
@@ -13,14 +13,9 @@ import type { Quote } from '@/src/types';
 
 function CopyButton({ text }: { text: string }): ReactElement {
   const { colors } = useTheme();
-  const [copied, setCopied] = useState(false);
-  const handleCopy = async (): Promise<void> => {
-    await Clipboard.setStringAsync(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
+  const { copied, copy } = useCopyFeedback();
   return (
-    <Pressable onPress={() => void handleCopy()} accessibilityLabel="Copy quote" style={{ padding: 4 }}>
+    <Pressable onPress={() => void copy(text)} accessibilityLabel="Copy quote" style={{ padding: 4 }}>
       <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={15} color={copied ? colors.caramel : colors.taupe} />
     </Pressable>
   );
@@ -32,16 +27,13 @@ export function AuthorDetail({ authorId }: { authorId: string }): ReactElement {
   const author = authorById(authorId);
   const { quotes, saveQuote, removeQuote } = useQuoteBank();
   const [filter, setFilter] = useState<'all' | 'saved'>('all');
-  const goToAuthorsList = () => router.replace('/authors');
   if (!author) return (
     <View style={styles.page}>
-      <Pressable accessibilityRole="button" onPress={goToAuthorsList} style={styles.backButton}><Text style={styles.backButtonText}>‹ All Authors</Text></Pressable>
       <Text style={styles.name}>Author not found.</Text>
     </View>
   );
   return (
     <ScrollView contentContainerStyle={styles.page}>
-      <Pressable accessibilityRole="button" onPress={goToAuthorsList} style={styles.backButton}><Text style={styles.backButtonText}>‹ All Authors</Text></Pressable>
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.name}>{author.name}</Text>
@@ -91,8 +83,6 @@ export default function AuthorDetailScreen(): ReactElement {
 function makeStyles(colors: Colors, scale: (n: number) => number) {
   return StyleSheet.create({
     page: { padding: 20, backgroundColor: colors.cream, flexGrow: 1 },
-    backButton: { alignSelf: 'flex-start', marginBottom: 16, paddingVertical: 6, paddingHorizontal: 4 },
-    backButtonText: { color: colors.burntCaramel, fontWeight: '800', fontSize: scale(15) },
     header: { flexDirection: 'row', alignItems: 'center', marginBottom: 22 },
     headerText: { flex: 1, paddingRight: 16 },
     name: { fontSize: scale(29), fontWeight: '800', color: colors.chocolate },

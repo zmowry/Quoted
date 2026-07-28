@@ -7,6 +7,7 @@ jest.mock('expo-notifications', () => ({
   getPermissionsAsync: jest.fn(async () => ({ status: 'granted' })),
   requestPermissionsAsync: jest.fn(async () => ({ status: 'granted' })),
   cancelAllScheduledNotificationsAsync: jest.fn(),
+  getAllScheduledNotificationsAsync: jest.fn(async () => []),
   scheduleNotificationAsync: jest.fn(async () => 'test-notification-id'),
 }));
 
@@ -16,6 +17,7 @@ jest.mock('@react-native-async-storage/async-storage', () => {
     getItem: jest.fn((key: string) => Promise.resolve(data.get(key) ?? null)),
     setItem: jest.fn((key: string, value: string) => { data.set(key, value); return Promise.resolve(); }),
     removeItem: jest.fn((key: string) => { data.delete(key); return Promise.resolve(); }),
+    multiRemove: jest.fn((keys: string[]) => { keys.forEach((key) => data.delete(key)); return Promise.resolve(); }),
     clear: jest.fn(() => { data.clear(); return Promise.resolve(); }),
   };
 });

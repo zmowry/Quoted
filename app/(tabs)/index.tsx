@@ -5,9 +5,9 @@ import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
 import { shareAsync } from 'expo-sharing';
-import * as Clipboard from 'expo-clipboard';
 import { QuoteCard } from '@/src/components/QuoteCard';
 import { CollectionModal } from '@/src/components/CollectionModal';
+import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { Colors } from '@/src/theme';
@@ -25,7 +25,7 @@ export default function QuoteBankScreen(): ReactElement {
   const [activeCollection, setActiveCollection] = useState<string | null>(null);
   const [taggedQuote, setTaggedQuote] = useState<Quote | null>(null);
   const [sharing, setSharing] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const { copied, copy } = useCopyFeedback();
   const [refreshing, setRefreshing] = useState(false);
   const bannerRef = useRef<View>(null);
 
@@ -75,7 +75,7 @@ export default function QuoteBankScreen(): ReactElement {
             <Ionicons name="share-outline" size={13} color={colors.mutedChocolate} />
             <Text style={styles.shareText}>{sharing ? 'Preparing...' : 'Share quote'}</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" onPress={async () => { await Clipboard.setStringAsync(quoteOfDay.text); setCopied(true); setTimeout(() => setCopied(false), 1500); }} style={styles.bannerActionBtn}>
+          <Pressable accessibilityRole="button" onPress={() => void copy(quoteOfDay.text)} style={styles.bannerActionBtn}>
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={13} color={copied ? colors.caramel : colors.mutedChocolate} />
             <Text style={[styles.shareText, copied && { color: colors.caramel }]}>{copied ? 'Copied!' : 'Copy quote'}</Text>
           </Pressable>

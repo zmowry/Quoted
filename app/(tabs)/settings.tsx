@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useNotificationPermission } from '@/src/hooks/useNotificationPermission';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { TextSize } from '@/src/hooks/useTheme';
-import type { Colors } from '@/src/theme';
+import type { Colors, ThemeMode } from '@/src/theme';
 import type { AdditionalQuotesSettings, NotificationTime } from '@/src/types';
 
 const pad = (value: number): string => value.toString().padStart(2, '0');
@@ -47,8 +48,11 @@ function TimePicker({ value, label, onChange, compact = false, colors, scale }: 
 }
 
 export default function SettingsScreen(): ReactElement {
-  const { notificationTime, additionalQuotes, loading, updateNotificationTime, updateAdditionalQuotes } = useQuoteBank();
-  const { colors, mode, setMode, textSize, setTextSize, scale } = useTheme();
+  const { notificationTime, additionalQuotes, quotes, collections, loading, updateNotificationTime, updateAdditionalQuotes, clearAllData } = useQuoteBank();
+  const { colors, mode, resolvedMode, setMode, textSize, setTextSize, scale } = useTheme();
+  const { status: permissionStatus, request: requestPermission, openSystemSettings } = useNotificationPermission();
+  // 'unknown' means the check itself failed; stay quiet rather than raise a false alarm.
+  const needsPermission = permissionStatus === 'denied' || permissionStatus === 'undetermined';
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
 
   const [mainTime, setMainTime] = useState<TimeState>(fromNT(notificationTime));
@@ -90,16 +94,36 @@ export default function SettingsScreen(): ReactElement {
     setExtraSaved(true);
   };
 
+  const modeOptions: { value: ThemeMode; label: string }[] = [
+    { value: 'light', label: 'Light' },
+    { value: 'dark', label: 'Dark' },
+    { value: 'system', label: 'System' },
+  ];
+
   const textSizeOptions: { value: TextSize; label: string }[] = [
     { value: 'small', label: 'Small' },
     { value: 'medium', label: 'Medium' },
     { value: 'large', label: 'Large' },
   ];
 
-  const [openDisplay, setOpenDisplay] = useState(true);
-  const [openTextSize, setOpenTextSize] = useState(true);
-  const [openDelivery, setOpenDelivery] = useState(true);
-  const [openExtra, setOpenExtra] = useState(true);
+  // Destructive and irreversible, so it asks twice and never defaults to the
+  // affirmative button.
+  const confirmClearAll = (): void => {
+    Alert.alert(
+      'Clear all data?',
+      `This deletes ${quotes.length} saved ${quotes.length === 1 ? 'quote' : 'quotes'} and ${collections.length} ${collections.length === 1 ? 'collection' : 'collections'} from this device. It cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete everything', style: 'destructive', onPress: () => void clearAllData() },
+      ],
+    );
+  };
+
+  const [openDisplay, setOpenDisplay] = useState(false);
+  const [openTextSize, setOpenTextSize] = useState(false);
+  const [openDelivery, setOpenDelivery] = useState(false);
+  const [openExtra, setOpenExtra] = useState(false);
+  const [openData, setOpenData] = useState(false);
 
   // Don't render the form over stale defaults; the fields would visibly reset
   // under the user the moment the stored settings land.
@@ -107,6 +131,29 @@ export default function SettingsScreen(): ReactElement {
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.page}>
+
+      {/* Sits above the cards, not inside one: the cards start collapsed, so a
+          warning nested in one would never be seen by the people it is for. */}
+      {needsPermission ? (
+        <View style={styles.permissionBanner}>
+          <Ionicons name="notifications-off-outline" size={18} color={colors.burntCaramel} />
+          <View style={styles.permissionText}>
+            <Text style={styles.permissionTitle}>Notifications are turned off</Text>
+            <Text style={styles.permissionCopy}>
+              {permissionStatus === 'denied'
+                ? 'Quoted cannot deliver quotes until you allow notifications in system settings. The times below will not fire.'
+                : 'Allow notifications so your daily quote can reach you.'}
+            </Text>
+          </View>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => void (permissionStatus === 'denied' ? openSystemSettings() : requestPermission())}
+            style={styles.permissionBtn}
+          >
+            <Text style={styles.permissionBtnText}>{permissionStatus === 'denied' ? 'Open settings' : 'Allow'}</Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <View style={styles.card}>
         <Pressable style={styles.cardHeader} onPress={() => setOpenDisplay((v) => !v)}>
@@ -116,13 +163,13 @@ export default function SettingsScreen(): ReactElement {
         {openDisplay ? (
           <View style={styles.cardBody}>
             <View style={styles.modeRow}>
-              <Pressable onPress={() => void setMode('light')} style={[styles.modeBtn, mode === 'light' && styles.modeBtnActive]}>
-                <Text style={[styles.modeBtnText, mode === 'light' && styles.modeBtnTextActive]}>Light</Text>
-              </Pressable>
-              <Pressable onPress={() => void setMode('dark')} style={[styles.modeBtn, mode === 'dark' && styles.modeBtnActive]}>
-                <Text style={[styles.modeBtnText, mode === 'dark' && styles.modeBtnTextActive]}>Dark</Text>
-              </Pressable>
+              {modeOptions.map(({ value, label }) => (
+                <Pressable key={value} onPress={() => void setMode(value)} style={[styles.modeBtn, mode === value && styles.modeBtnActive]}>
+                  <Text style={[styles.modeBtnText, mode === value && styles.modeBtnTextActive]}>{label}</Text>
+                </Pressable>
+              ))}
             </View>
+            {mode === 'system' ? <Text style={styles.copy}>Following your device appearance ({resolvedMode}).</Text> : null}
           </View>
         ) : null}
       </View>
@@ -208,6 +255,26 @@ export default function SettingsScreen(): ReactElement {
         ) : null}
       </View>
 
+      <View style={styles.card}>
+        <Pressable style={styles.cardHeader} onPress={() => setOpenData((v) => !v)}>
+          <Text style={styles.cardTitle}>Your data</Text>
+          <Ionicons name={openData ? 'chevron-up' : 'chevron-down'} size={16} color={colors.mutedChocolate} />
+        </Pressable>
+        {openData ? (
+          <View style={styles.cardBody}>
+            <Text style={styles.copy}>
+              Everything lives on this device only. Clearing removes your saved quotes, collections,
+              and notification settings, and cancels any quotes already queued for delivery.
+            </Text>
+            <Text style={styles.dataCount}>{quotes.length} saved {quotes.length === 1 ? 'quote' : 'quotes'} · {collections.length} {collections.length === 1 ? 'collection' : 'collections'}</Text>
+            <Pressable accessibilityRole="button" onPress={confirmClearAll} style={({ pressed }) => [styles.dangerButton, { opacity: pressed ? 0.75 : 1 }]}>
+              <Ionicons name="trash-outline" size={13} color={colors.white} />
+              <Text style={styles.buttonText}>Clear all data</Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </View>
+
     </ScrollView>
   );
 }
@@ -218,6 +285,12 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cream },
     page: { padding: 14, paddingBottom: 40, gap: 12 },
     card: { backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border, shadowColor: colors.chocolate, shadowOpacity: 0.07, shadowRadius: 6, elevation: 2 },
+    permissionBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.softCream, borderRadius: 14, borderWidth: 1, borderColor: colors.burntCaramel, padding: 14 },
+    permissionText: { flex: 1 },
+    permissionTitle: { fontSize: scale(14), fontWeight: '800', color: colors.chocolate },
+    permissionCopy: { marginTop: 3, fontSize: scale(12), lineHeight: scale(17), color: colors.mutedChocolate },
+    permissionBtn: { backgroundColor: colors.burntCaramel, paddingHorizontal: 11, paddingVertical: 7, borderRadius: 8 },
+    permissionBtnText: { color: colors.white, fontWeight: '800', fontSize: scale(11) },
     cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
     cardBody: { paddingHorizontal: 16, paddingBottom: 16 },
     cardTitle: { fontSize: scale(18), fontWeight: '800', color: colors.chocolate, flex: 1 },
@@ -241,6 +314,8 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     periodTextSm: { color: colors.mutedChocolate, fontWeight: '800', fontSize: scale(11) },
     periodTextSelected: { color: colors.white },
     button: { backgroundColor: colors.caramel, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, alignItems: 'center' },
+    dangerButton: { flexDirection: 'row', gap: 6, backgroundColor: colors.burntCaramel, paddingVertical: 8, paddingHorizontal: 14, borderRadius: 8, alignItems: 'center', justifyContent: 'center', marginTop: 14 },
+    dataCount: { marginTop: 10, fontSize: scale(12), fontWeight: '700', color: colors.chocolate },
     buttonText: { color: colors.white, fontWeight: '800', fontSize: scale(12) },
     savedMsg: { marginTop: 7, color: '#2E7D32', fontWeight: '700', fontSize: scale(12), textAlign: 'center' },
     label: { fontSize: scale(13), fontWeight: '700', color: colors.chocolate, marginTop: 10 },
