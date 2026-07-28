@@ -33,27 +33,30 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
       setQuotes(storedQuotes); setTime(storedTime); setAdditionalQuotes(storedExtra); setCollections(storedCollections);
       const next = await nextQuoteInCycle(storedQuotes);
       setQuoteOfDay(next);
-      await scheduleAllNotifications(storedTime, next, storedExtra, storedQuotes);
+      await scheduleAllNotifications(storedTime, next, storedExtra, storedQuotes, { skipIfAlreadyScheduled: true });
     } finally { setLoading(false); }
   })(); }, []);
 
   const saveQuote = useCallback(async (quote: Quote) => {
     const next = await quoteStorage.saveQuote(quote);
     setQuotes(next); await reconcileQueue(next);
-    if (!quoteOfDay) await refreshQuoteOfDay();
-    else await scheduleAllNotifications(notificationTime, quoteOfDay, additionalQuotes, next);
-  }, [notificationTime, quoteOfDay, additionalQuotes, refreshQuoteOfDay]);
+    // Seed the banner if this is the first quote, but leave notifications alone.
+    // They will pick up the new quote on the next scheduled refresh.
+    if (!quoteOfDay) {
+      const first = await nextQuoteInCycle(next);
+      setQuoteOfDay(first);
+    }
+  }, [quoteOfDay]);
 
   const removeQuote = useCallback(async (id: string) => {
     const next = await quoteStorage.deleteQuote(id);
     setQuotes(next); await reconcileQueue(next);
     const current = next.some((q) => q.id === quoteOfDay?.id) ? quoteOfDay : await nextQuoteInCycle(next);
     setQuoteOfDay(current);
-    await scheduleAllNotifications(notificationTime, current, additionalQuotes, next);
     // remove from all collections
     const updated = collections.map((c) => ({ ...c, quoteIds: c.quoteIds.filter((qid) => qid !== id) }));
     setCollections(updated); await quoteStorage.setCollections(updated);
-  }, [notificationTime, quoteOfDay, additionalQuotes, collections]);
+  }, [quoteOfDay, collections]);
 
   const updateNotificationTime = useCallback(async (time: NotificationTime) => {
     await quoteStorage.setNotificationTime(time); setTime(time);

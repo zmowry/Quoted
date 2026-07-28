@@ -31,6 +31,7 @@ export function AuthorDetail({ authorId }: { authorId: string }): ReactElement {
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const author = authorById(authorId);
   const { quotes, saveQuote, removeQuote } = useQuoteBank();
+  const [filter, setFilter] = useState<'all' | 'saved'>('all');
   const goToAuthorsList = () => router.replace('/authors');
   if (!author) return (
     <View style={styles.page}>
@@ -52,7 +53,18 @@ export function AuthorDetail({ authorId }: { authorId: string }): ReactElement {
             : <View style={[styles.photo, styles.photoPlaceholder]}><Text style={styles.photoInitial}>{author.name.charAt(0)}</Text></View>}
         </View>
       </View>
-      {author.quotes.map((rawQuote) => {
+      <View style={styles.filterRow}>
+        <Pressable accessibilityRole="button" onPress={() => setFilter('all')} style={[styles.filterTab, filter === 'all' && styles.filterTabActive]}>
+          <Text style={[styles.filterTabText, filter === 'all' && styles.filterTabTextActive]}>All Quotes</Text>
+        </Pressable>
+        <Pressable accessibilityRole="button" onPress={() => setFilter('saved')} style={[styles.filterTab, filter === 'saved' && styles.filterTabActive]}>
+          <Text style={[styles.filterTabText, filter === 'saved' && styles.filterTabTextActive]}>Saved Quotes</Text>
+        </Pressable>
+      </View>
+      {filter === 'saved' && author.quotes.every((q) => !quotes.some((s) => s.id === q.id)) && (
+        <Text style={styles.emptyText}>No saved quotes from this author yet.</Text>
+      )}
+      {(filter === 'saved' ? author.quotes.filter((q) => quotes.some((s) => s.id === q.id)) : author.quotes).map((rawQuote) => {
         const quote: Quote = { ...rawQuote, authorName: author.name };
         const saved = quotes.some((item) => item.id === quote.id);
         return (
@@ -89,6 +101,12 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     photo: { width: 84, height: 84, borderRadius: 42 },
     photoPlaceholder: { backgroundColor: colors.taupe, alignItems: 'center', justifyContent: 'center' },
     photoInitial: { color: colors.white, fontSize: scale(28), fontWeight: '800' },
+    filterRow: { flexDirection: 'row', backgroundColor: colors.white, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 3, marginBottom: 14 },
+    filterTab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 7 },
+    filterTabActive: { backgroundColor: colors.caramel },
+    filterTabText: { fontSize: scale(13), fontWeight: '700', color: colors.mutedChocolate },
+    filterTabTextActive: { color: colors.white },
+    emptyText: { fontSize: scale(14), color: colors.mutedChocolate, fontStyle: 'italic', textAlign: 'center', marginTop: 20 },
     quoteCard: { backgroundColor: colors.white, borderRadius: 12, borderColor: colors.border, borderWidth: 1, padding: 12, marginBottom: 10 },
     quoteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
     quote: { fontSize: scale(14), lineHeight: scale(20), color: colors.chocolate },

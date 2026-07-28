@@ -17,7 +17,7 @@ import { authorPhotos } from '@/src/data/authorPhotos';
 type AuthorGroup = { id: string; authorName: string };
 
 export default function QuoteBankScreen(): ReactElement {
-  const { quotes, quoteOfDay, loading, removeQuote, collections, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection } = useQuoteBank();
+  const { quotes, quoteOfDay, loading, removeQuote, refreshQuoteOfDay, collections, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection } = useQuoteBank();
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const router = useRouter();
@@ -26,6 +26,7 @@ export default function QuoteBankScreen(): ReactElement {
   const [taggedQuote, setTaggedQuote] = useState<Quote | null>(null);
   const [sharing, setSharing] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const bannerRef = useRef<View>(null);
 
   const authorGroups = useMemo<AuthorGroup[]>(() => {
@@ -77,6 +78,10 @@ export default function QuoteBankScreen(): ReactElement {
           <Pressable accessibilityRole="button" onPress={async () => { await Clipboard.setStringAsync(quoteOfDay.text); setCopied(true); setTimeout(() => setCopied(false), 1500); }} style={styles.bannerActionBtn}>
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={13} color={copied ? colors.caramel : colors.mutedChocolate} />
             <Text style={[styles.shareText, copied && { color: colors.caramel }]}>{copied ? 'Copied!' : 'Copy quote'}</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" onPress={async () => { if (refreshing) return; setRefreshing(true); try { await refreshQuoteOfDay(); } finally { setRefreshing(false); } }} style={styles.bannerActionBtn} disabled={refreshing}>
+            <Ionicons name="refresh" size={13} color={colors.mutedChocolate} />
+            <Text style={styles.shareText}>{refreshing ? 'Refreshing...' : 'Refresh'}</Text>
           </Pressable>
         </View>
       ) : null}

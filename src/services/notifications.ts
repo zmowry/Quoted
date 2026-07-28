@@ -23,10 +23,15 @@ export async function scheduleAllNotifications(
   mainTime: NotificationTime,
   mainQuote: Quote | undefined,
   additionalSettings?: AdditionalQuotesSettings,
-  allQuotes?: Quote[]
+  allQuotes?: Quote[],
+  options?: { skipIfAlreadyScheduled?: boolean }
 ): Promise<void> {
   try {
     if (!(await ensurePermission())) return;
+    if (options?.skipIfAlreadyScheduled) {
+      const existing = await Notifications.getAllScheduledNotificationsAsync();
+      if (existing.length > 0) return;
+    }
     await Notifications.cancelAllScheduledNotificationsAsync();
     await Notifications.scheduleNotificationAsync({
       content: { title: 'Daily Quote Bank', body: mainQuote ? `"${mainQuote.text}" -- ${mainQuote.authorName}` : 'No quotes saved!', sound: true },
