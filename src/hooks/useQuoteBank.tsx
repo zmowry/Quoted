@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import type { PropsWithChildren } from 'react';
+import type { PropsWithChildren, ReactElement } from 'react';
 import type { AdditionalQuotesSettings, Collection, NotificationTime, Quote, QuoteBankContextValue } from '@/src/types';
 import { quoteStorage } from '@/src/services/storage';
 import { nextQuoteInCycle, reconcileQueue } from '@/src/services/queueManager';
@@ -9,7 +9,7 @@ const QuoteBankContext = createContext<QuoteBankContextValue | undefined>(undefi
 
 const uid = () => Math.random().toString(36).slice(2);
 
-export function QuoteBankProvider({ children }: PropsWithChildren): JSX.Element {
+export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [quoteOfDay, setQuoteOfDay] = useState<Quote>();
   const [notificationTime, setTime] = useState<NotificationTime>({ hour: 9, minute: 0 });

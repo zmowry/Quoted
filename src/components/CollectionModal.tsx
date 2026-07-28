@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { ReactElement } from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/hooks/useTheme';
@@ -15,7 +16,7 @@ interface Props {
   onDelete: (collectionId: string) => void;
 }
 
-export function CollectionModal({ quote, collections, onClose, onAdd, onRemove, onNew, onDelete }: Props): JSX.Element {
+export function CollectionModal({ quote, collections, onClose, onAdd, onRemove, onNew, onDelete }: Props): ReactElement {
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const [newName, setNewName] = useState('');
@@ -30,7 +31,7 @@ export function CollectionModal({ quote, collections, onClose, onAdd, onRemove, 
   return (
     <Modal visible={quote !== null} transparent animationType="slide" onRequestClose={onClose}>
       <Pressable style={styles.backdrop} onPress={onClose} />
-      <View style={styles.sheet}>
+      <View style={styles.sheet} testID="collection-sheet">
         <View style={styles.handle} />
         <Text style={styles.title}>Add to collection</Text>
         <Text style={styles.quotePrev} numberOfLines={2}>{quote ? `"${quote.text}"` : ''}</Text>

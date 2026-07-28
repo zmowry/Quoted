@@ -1,8 +1,9 @@
+import type { ReactElement } from 'react';
 import { FontAwesome } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import { useTheme } from '@/src/hooks/useTheme';
 
-export default function TabsLayout(): JSX.Element {
+export default function TabsLayout(): ReactElement {
   const { colors } = useTheme();
   return (
     <Tabs screenOptions={{

@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import type { ReactElement } from 'react';
 import { ActivityIndicator, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
@@ -15,7 +16,7 @@ import { authorPhotos } from '@/src/data/authorPhotos';
 
 type AuthorGroup = { id: string; authorName: string };
 
-export default function QuoteBankScreen(): JSX.Element {
+export default function QuoteBankScreen(): ReactElement {
   const { quotes, quoteOfDay, loading, removeQuote, collections, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection } = useQuoteBank();
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
@@ -83,7 +84,7 @@ export default function QuoteBankScreen(): JSX.Element {
   );
 
   const collectionChips = (
-    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsScroll} contentContainerStyle={styles.chipsContent}>
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} testID="collection-chips" style={styles.chipsScroll} contentContainerStyle={styles.chipsContent}>
       <Pressable onPress={() => setActiveCollection(null)} style={[styles.chip, activeCollection === null && styles.chipActive]}>
         <Text style={[styles.chipText, activeCollection === null && styles.chipTextActive]}>All</Text>
       </Pressable>
@@ -100,10 +101,10 @@ export default function QuoteBankScreen(): JSX.Element {
       <View style={styles.headingRow}>
         <Text style={styles.heading}>My saved quotes</Text>
         <View style={styles.toggle}>
-          <Pressable onPress={() => setViewMode('random')} style={[styles.toggleBtn, viewMode === 'random' && styles.toggleActive]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Show all quotes" onPress={() => setViewMode('random')} style={[styles.toggleBtn, viewMode === 'random' && styles.toggleActive]}>
             <Ionicons name="shuffle" size={15} color={viewMode === 'random' ? colors.white : colors.mutedChocolate} />
           </Pressable>
-          <Pressable onPress={() => setViewMode('author')} style={[styles.toggleBtn, viewMode === 'author' && styles.toggleActive]}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Group by author" onPress={() => setViewMode('author')} style={[styles.toggleBtn, viewMode === 'author' && styles.toggleActive]}>
             <Ionicons name="people" size={15} color={viewMode === 'author' ? colors.white : colors.mutedChocolate} />
           </Pressable>
         </View>

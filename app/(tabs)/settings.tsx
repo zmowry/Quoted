@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { ReactElement } from 'react';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
@@ -21,7 +22,7 @@ const toNT = (t: TimeState): NotificationTime | null => {
   return { hour: to24(h, t.meridiem), minute: m };
 };
 
-function TimePicker({ value, label, onChange, compact = false, colors, scale }: { value: TimeState; label: string; onChange: (v: TimeState) => void; compact?: boolean; colors: Colors; scale: (n: number) => number }): JSX.Element {
+function TimePicker({ value, label, onChange, compact = false, colors, scale }: { value: TimeState; label: string; onChange: (v: TimeState) => void; compact?: boolean; colors: Colors; scale: (n: number) => number }): ReactElement {
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const inp = compact ? styles.inputSm : styles.inputMd;
   const col = compact ? styles.colonSm : styles.colonMd;
@@ -45,14 +46,13 @@ function TimePicker({ value, label, onChange, compact = false, colors, scale }: 
   );
 }
 
-export default function SettingsScreen(): JSX.Element {
-  const { notificationTime, additionalQuotes, updateNotificationTime, updateAdditionalQuotes } = useQuoteBank();
+export default function SettingsScreen(): ReactElement {
+  const { notificationTime, additionalQuotes, loading, updateNotificationTime, updateAdditionalQuotes } = useQuoteBank();
   const { colors, mode, setMode, textSize, setTextSize, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
 
   const [mainTime, setMainTime] = useState<TimeState>(fromNT(notificationTime));
   const [mainSaved, setMainSaved] = useState(false);
-  useEffect(() => { setMainTime(fromNT(notificationTime)); }, [notificationTime.hour, notificationTime.minute]);
 
   const saveMain = async (): Promise<void> => {
     const nt = toNT(mainTime);
@@ -65,11 +65,20 @@ export default function SettingsScreen(): JSX.Element {
   const [extraCount, setExtraCount] = useState(additionalQuotes.count);
   const [extraTimes, setExtraTimes] = useState<TimeState[]>(additionalQuotes.times.map(fromNT));
   const [extraSaved, setExtraSaved] = useState(false);
+
+  // Stored settings arrive asynchronously, so seed the form from them exactly once.
+  // Re-syncing on every context change would clobber unsaved input: the provider
+  // hands back a fresh `additionalQuotes` object on each update, so an effect keyed
+  // on it fires after the user has already started editing and resets their choices.
+  const hydrated = useRef(false);
   useEffect(() => {
+    if (loading || hydrated.current) return;
+    hydrated.current = true;
+    setMainTime(fromNT(notificationTime));
     setExtraEnabled(additionalQuotes.enabled);
     setExtraCount(additionalQuotes.count);
     setExtraTimes(additionalQuotes.times.map(fromNT));
-  }, [additionalQuotes]);
+  }, [loading, notificationTime, additionalQuotes]);
 
   const markDirty = (): void => setExtraSaved(false);
 
@@ -91,6 +100,10 @@ export default function SettingsScreen(): JSX.Element {
   const [openTextSize, setOpenTextSize] = useState(true);
   const [openDelivery, setOpenDelivery] = useState(true);
   const [openExtra, setOpenExtra] = useState(true);
+
+  // Don't render the form over stale defaults; the fields would visibly reset
+  // under the user the moment the stored settings land.
+  if (loading) return <View style={styles.center}><ActivityIndicator /></View>;
 
   return (
     <ScrollView style={styles.scroll} contentContainerStyle={styles.page}>
@@ -202,6 +215,7 @@ export default function SettingsScreen(): JSX.Element {
 function makeStyles(colors: Colors, scale: (n: number) => number) {
   return StyleSheet.create({
     scroll: { flex: 1, backgroundColor: colors.cream },
+    center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cream },
     page: { padding: 14, paddingBottom: 40, gap: 12 },
     card: { backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border, shadowColor: colors.chocolate, shadowOpacity: 0.07, shadowRadius: 6, elevation: 2 },
     cardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },

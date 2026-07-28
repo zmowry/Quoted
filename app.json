@@ -1,11 +1,22 @@
 {
   "expo": {
-    "name": "Daily Quote Bank",
-    "slug": "daily-quote-bank",
-    "scheme": "dailyquotebank",
+    "name": "Quoted",
+    "slug": "quoted",
+    "scheme": "quoted",
     "version": "1.0.0",
     "orientation": "portrait",
-    "platforms": ["ios", "web"],
+    "platforms": ["ios"],
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#FFF8ED"
+    },
+    "ios": {
+      "bundleIdentifier": "REPLACE_WITH_BUNDLE_ID",
+      "buildNumber": "1",
+      "supportsTablet": false
+    },
     "plugins": ["expo-router", "expo-notifications"],
     "web": { "bundler": "metro" }
   }

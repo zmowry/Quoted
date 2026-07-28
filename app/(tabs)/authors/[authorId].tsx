@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { ReactElement } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Image, ScrollView, StyleSheet, Text, Pressable, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -10,7 +11,7 @@ import { useTheme } from '@/src/hooks/useTheme';
 import type { Colors } from '@/src/theme';
 import type { Quote } from '@/src/types';
 
-function CopyButton({ text }: { text: string }): JSX.Element {
+function CopyButton({ text }: { text: string }): ReactElement {
   const { colors } = useTheme();
   const [copied, setCopied] = useState(false);
   const handleCopy = async (): Promise<void> => {
@@ -25,7 +26,7 @@ function CopyButton({ text }: { text: string }): JSX.Element {
   );
 }
 
-export function AuthorDetail({ authorId }: { authorId: string }): JSX.Element {
+export function AuthorDetail({ authorId }: { authorId: string }): ReactElement {
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const author = authorById(authorId);
@@ -70,7 +71,7 @@ export function AuthorDetail({ authorId }: { authorId: string }): JSX.Element {
   );
 }
 
-export default function AuthorDetailScreen(): JSX.Element {
+export default function AuthorDetailScreen(): ReactElement {
   const { authorId } = useLocalSearchParams<{ authorId: string }>();
   return <AuthorDetail authorId={authorId} />;
 }

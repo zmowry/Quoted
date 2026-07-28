@@ -26,8 +26,13 @@ export const darkColors = {
   danger: '#D05040',
   border: '#4A2C18',
   gold: '#E4A864',
-} as const;
+} as const satisfies Colors;
 
-export type Colors = typeof lightColors;
+/**
+ * Both palettes are `as const`, so their literal hex types differ. Widen the
+ * values to `string` while keeping the key set exact, so every palette (light,
+ * dark, and any future one) is assignable to `Colors`.
+ */
+export type Colors = { readonly [K in keyof typeof lightColors]: string };
 
 export const colors = lightColors;

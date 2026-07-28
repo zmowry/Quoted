@@ -2,7 +2,10 @@ import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import type { AdditionalQuotesSettings, NotificationTime, Quote } from '@/src/types';
 
-Notifications.setNotificationHandler({ handleNotification: async () => ({ shouldShowAlert: true, shouldPlaySound: true, shouldSetBadge: false }) });
+// SDK 53+ replaced the single `shouldShowAlert` flag with separate banner/list controls.
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({ shouldShowBanner: true, shouldShowList: true, shouldPlaySound: true, shouldSetBadge: false }),
+});
 
 async function ensurePermission(): Promise<boolean> {
   try {

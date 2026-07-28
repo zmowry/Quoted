@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
-import type { PropsWithChildren } from 'react';
+import type { PropsWithChildren, ReactElement } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { lightColors, darkColors } from '@/src/theme';
 import type { Colors, ThemeMode } from '@/src/theme';
@@ -20,7 +20,7 @@ interface ThemeContextValue {
 
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
-export function ThemeProvider({ children }: PropsWithChildren): JSX.Element {
+export function ThemeProvider({ children }: PropsWithChildren): ReactElement {
   const [mode, setModeState] = useState<ThemeMode>('light');
   const [textSize, setTextSizeState] = useState<TextSize>('medium');
 

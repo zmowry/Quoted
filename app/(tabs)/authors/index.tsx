@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { ReactElement } from 'react';
 import { FlatList, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
 import { authorsData } from '@/src/data/authorsData';
@@ -11,7 +12,7 @@ type SortMode = 'last' | 'first';
 function lastName(name: string): string { const parts = name.trim().split(' '); return parts[parts.length - 1]; }
 function firstName(name: string): string { return name.trim().split(' ')[0]; }
 
-export default function AuthorsScreen(): JSX.Element {
+export default function AuthorsScreen(): ReactElement {
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const [search, setSearch] = useState('');

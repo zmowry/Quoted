@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import type { ReactElement } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -13,7 +14,7 @@ interface Props {
   onTag?: () => void;
 }
 
-export function QuoteCard({ quote, onDelete, onTag }: Props): JSX.Element {
+export function QuoteCard({ quote, onDelete, onTag }: Props): ReactElement {
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const router = useRouter();
