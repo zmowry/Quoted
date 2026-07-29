@@ -5,17 +5,18 @@ import { Image, ScrollView, StyleSheet, Text, Pressable, View } from 'react-nati
 import { Ionicons } from '@expo/vector-icons';
 import { authorById } from '@/src/data/authorsData';
 import { authorPhotos } from '@/src/data/authorPhotos';
+import { quoteWithAttribution } from '@/src/format';
 import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { Colors } from '@/src/theme';
 import type { Quote } from '@/src/types';
 
-function CopyButton({ text }: { text: string }): ReactElement {
+function CopyButton({ quote }: { quote: Pick<Quote, 'text' | 'authorName'> }): ReactElement {
   const { colors } = useTheme();
   const { copied, copy } = useCopyFeedback();
   return (
-    <Pressable onPress={() => void copy(text)} accessibilityLabel="Copy quote" style={{ padding: 4 }}>
+    <Pressable onPress={() => void copy(quoteWithAttribution(quote))} accessibilityLabel="Copy quote" style={{ padding: 4 }}>
       <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={15} color={copied ? colors.caramel : colors.taupe} />
     </Pressable>
   );
@@ -63,7 +64,7 @@ export function AuthorDetail({ authorId }: { authorId: string }): ReactElement {
           <View key={quote.id} style={styles.quoteCard}>
             <View style={styles.quoteRow}>
               <Text style={[styles.quote, { flex: 1 }]}>"{quote.text}"</Text>
-              <CopyButton text={quote.text} />
+              <CopyButton quote={quote} />
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel={saved ? `Remove ${quote.text}` : `Save ${quote.text}`} style={[styles.save, saved && styles.remove]} onPress={() => void (saved ? removeQuote(quote.id) : saveQuote(quote))}>
               <Text style={styles.saveText}>{saved ? 'Remove from My Bank' : '+ Save to My Bank'}</Text>

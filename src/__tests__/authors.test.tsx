@@ -1,5 +1,6 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { renderWithProviders } from '@/src/test-utils';
 import AuthorsScreen from '../../app/(tabs)/authors/index';
@@ -68,6 +69,17 @@ describe('Author detail', () => {
   it('shows a not-found message for an unknown author id', async () => {
     renderWithProviders(<AuthorDetail authorId="nobody-here" />);
     await screen.findByText('Author not found.');
+  });
+
+  it('copies a quote with its author attached', async () => {
+    renderWithProviders(<AuthorDetail authorId="woolf" />);
+    await screen.findByText('Virginia Woolf');
+    fireEvent.press(screen.getAllByLabelText('Copy quote')[0]);
+    // Asserted by shape rather than a fixed quote so it does not depend on the
+    // order of Woolf's quotes.
+    await waitFor(() => expect(Clipboard.setStringAsync).toHaveBeenCalledWith(
+      expect.stringMatching(/^".+" -- Virginia Woolf$/),
+    ));
   });
 
   it('toggles a quote between saved and unsaved', async () => {

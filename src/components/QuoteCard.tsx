@@ -4,6 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import type { Quote } from '@/src/types';
+import { quoteWithAttribution } from '@/src/format';
 import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { Colors } from '@/src/theme';
@@ -28,7 +29,7 @@ export function QuoteCard({ quote, onDelete, onTag }: Props): ReactElement {
           <Text style={styles.author}>-- {quote.authorName}</Text>
         </Pressable>
         <View style={styles.actions}>
-          <Pressable onPress={() => void copy(quote.text)} accessibilityLabel="Copy quote" style={styles.actionBtn}>
+          <Pressable onPress={() => void copy(quoteWithAttribution(quote))} accessibilityLabel="Copy quote" style={styles.actionBtn}>
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={14} color={copied ? colors.caramel : colors.taupe} />
           </Pressable>
           {onTag ? (

@@ -2,7 +2,7 @@ import { Alert } from 'react-native';
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { flushPending, renderWithProviders } from '@/src/test-utils';
+import { flushPending, lastTriggerDate, renderWithProviders } from '@/src/test-utils';
 import { STORAGE_KEYS } from '@/src/services/storage';
 import SettingsScreen from '../../app/(tabs)/settings';
 
@@ -117,6 +117,57 @@ describe('Display settings', () => {
   });
 });
 
+describe('Quote order and sound', () => {
+  it('defaults to in-order delivery with sound on', async () => {
+    await openSettings();
+    expandCard('Daily delivery');
+    expect(screen.getByText(/in the order you saved them/)).toBeTruthy();
+  });
+
+  it('persists the shuffle preference and explains it', async () => {
+    await openSettings();
+    expandCard('Daily delivery');
+    fireEvent.press(screen.getByRole('button', { name: 'Shuffle' }));
+    await waitFor(async () => expect(await AsyncStorage.getItem(STORAGE_KEYS.order)).toBe('shuffle'));
+    expect(screen.getByText(/every saved quote once before any repeats/)).toBeTruthy();
+
+    fireEvent.press(screen.getByRole('button', { name: 'In order' }));
+    await waitFor(async () => expect(await AsyncStorage.getItem(STORAGE_KEYS.order)).toBe('sequential'));
+  });
+
+  it('reschedules when sound is switched off so the change takes effect now', async () => {
+    await openSettings();
+    expandCard('Daily delivery');
+    jest.clearAllMocks();
+
+    fireEvent.press(screen.getByRole('button', { name: 'No' }));
+    await waitFor(async () => expect(await AsyncStorage.getItem(STORAGE_KEYS.sound)).toBe('false'));
+    // Sound is baked into the pending notification, so it must be rebuilt rather
+    // than left for the next launch.
+    await waitFor(() => expect(Notifications.scheduleNotificationAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({ content: expect.objectContaining({ sound: false }) }),
+    ));
+    // A trigger without an explicit type is parsed as "deliver now", so toggling
+    // the sound would push a quote to the lock screen instead of just rescheduling.
+    expect(Notifications.scheduleNotificationAsync).toHaveBeenLastCalledWith(
+      expect.objectContaining({ trigger: expect.objectContaining({ type: 'date' }) }),
+    );
+    expect(lastTriggerDate().getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('restores a stored order and sound choice on mount', async () => {
+    await AsyncStorage.setItem(STORAGE_KEYS.order, 'shuffle');
+    await AsyncStorage.setItem(STORAGE_KEYS.sound, 'false');
+    await openSettings();
+    expandCard('Daily delivery');
+    expect(screen.getByText(/every saved quote once before any repeats/)).toBeTruthy();
+    // Scheduling on mount must honour the stored preference, not the default.
+    await waitFor(() => expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(
+      expect.objectContaining({ content: expect.objectContaining({ sound: false }) }),
+    ));
+  });
+});
+
 describe('Clearing all data', () => {
   // Alert is mocked, so drive the confirmation by invoking the button the dialog
   // would have shown.
@@ -210,10 +261,10 @@ describe('Daily delivery time', () => {
     fireEvent.changeText(screen.getByLabelText('Notification minute'), '05');
     fireEvent.press(screen.getByRole('button', { name: 'AM' }));
     fireEvent.press(screen.getByRole('button', { name: 'Save notification time' }));
-    // 12 AM is midnight -> hour 0.
-    await waitFor(() => expect(Notifications.scheduleNotificationAsync).toHaveBeenLastCalledWith(
-      expect.objectContaining({ trigger: expect.objectContaining({ hour: 0, minute: 5 }) }),
-    ));
+    // 12 AM is midnight -> hour 0. Deliveries are dated, so the time shows up in
+    // the trigger's local clock time rather than as trigger fields.
+    await waitFor(() => expect(lastTriggerDate().getHours()).toBe(0));
+    expect(lastTriggerDate().getMinutes()).toBe(5);
   });
 
   it('persists the delivery time across a remount', async () => {

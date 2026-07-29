@@ -1,7 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { AdditionalQuotesSettings, Collection, NotificationTime, QueueState, Quote } from '@/src/types';
+import type { AdditionalQuotesSettings, Collection, DailyAssignments, NotificationTime, QueueState, Quote, QuoteOrder } from '@/src/types';
 
 export const DEFAULT_NOTIFICATION_TIME: NotificationTime = { hour: 9, minute: 0 };
+export const DEFAULT_QUOTE_ORDER: QuoteOrder = 'sequential';
+export const DEFAULT_SOUND_ENABLED = true;
 export const DEFAULT_EXTRA_QUOTES: AdditionalQuotesSettings = { enabled: false, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 0 }, { hour: 6, minute: 0 }, { hour: 15, minute: 0 }, { hour: 18, minute: 0 }] };
 const DEFAULT_EXTRA = DEFAULT_EXTRA_QUOTES;
 
@@ -18,6 +20,9 @@ export const STORAGE_KEYS = {
   collections: '@quote-bank/collections',
   theme: '@quote-bank/theme',
   textSize: '@quote-bank/text-size',
+  order: '@quote-bank/quote-order',
+  sound: '@quote-bank/sound',
+  assignments: '@quote-bank/daily-assignments',
 } as const;
 
 const KEYS = STORAGE_KEYS;
@@ -33,6 +38,14 @@ export const quoteStorage = {
   async setNotificationTime(time: NotificationTime): Promise<void> { await AsyncStorage.setItem(KEYS.time, JSON.stringify(time)); },
   async getAdditionalQuotes(): Promise<AdditionalQuotesSettings> { return read(KEYS.extra, DEFAULT_EXTRA); },
   async setAdditionalQuotes(settings: AdditionalQuotesSettings): Promise<void> { await AsyncStorage.setItem(KEYS.extra, JSON.stringify(settings)); },
+  // Stored as a bare string rather than JSON; validated on read so an unexpected
+  // value falls back to the default instead of reaching the picker logic.
+  async getQuoteOrder(): Promise<QuoteOrder> { const raw = await AsyncStorage.getItem(KEYS.order); return raw === 'shuffle' || raw === 'sequential' ? raw : DEFAULT_QUOTE_ORDER; },
+  async setQuoteOrder(order: QuoteOrder): Promise<void> { await AsyncStorage.setItem(KEYS.order, order); },
+  async getSoundEnabled(): Promise<boolean> { return read(KEYS.sound, DEFAULT_SOUND_ENABLED); },
+  async setSoundEnabled(enabled: boolean): Promise<void> { await AsyncStorage.setItem(KEYS.sound, JSON.stringify(enabled)); },
+  async getDailyAssignments(): Promise<DailyAssignments> { return read(KEYS.assignments, {}); },
+  async setDailyAssignments(assignments: DailyAssignments): Promise<void> { await AsyncStorage.setItem(KEYS.assignments, JSON.stringify(assignments)); },
   async getCollections(): Promise<Collection[]> { return read(KEYS.collections, []); },
   async setCollections(collections: Collection[]): Promise<void> { await AsyncStorage.setItem(KEYS.collections, JSON.stringify(collections)); },
   /**

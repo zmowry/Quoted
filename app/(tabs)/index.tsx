@@ -7,6 +7,7 @@ import { captureRef } from 'react-native-view-shot';
 import { shareAsync } from 'expo-sharing';
 import { QuoteCard } from '@/src/components/QuoteCard';
 import { CollectionModal } from '@/src/components/CollectionModal';
+import { quoteWithAttribution } from '@/src/format';
 import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
@@ -29,19 +30,22 @@ export default function QuoteBankScreen(): ReactElement {
   const [refreshing, setRefreshing] = useState(false);
   const bannerRef = useRef<View>(null);
 
-  const authorGroups = useMemo<AuthorGroup[]>(() => {
-    const seen = new Map<string, AuthorGroup>();
-    for (const q of quotes) {
-      if (!seen.has(q.authorId)) seen.set(q.authorId, { id: q.authorId, authorName: q.authorName });
-    }
-    return Array.from(seen.values()).sort((a, b) => a.authorName.localeCompare(b.authorName));
-  }, [quotes]);
-
   const filteredQuotes = useMemo(() => {
     if (!activeCollection) return quotes;
     const col = collections.find((c) => c.id === activeCollection);
     return col ? quotes.filter((q) => col.quoteIds.includes(q.id)) : quotes;
   }, [quotes, collections, activeCollection]);
+
+  // Grouped from the filtered set, not the whole bank: the collection chips stay
+  // on screen in this view, so ignoring them here would leave a chip highlighted
+  // while the list below shows every author regardless.
+  const authorGroups = useMemo<AuthorGroup[]>(() => {
+    const seen = new Map<string, AuthorGroup>();
+    for (const q of filteredQuotes) {
+      if (!seen.has(q.authorId)) seen.set(q.authorId, { id: q.authorId, authorName: q.authorName });
+    }
+    return Array.from(seen.values()).sort((a, b) => a.authorName.localeCompare(b.authorName));
+  }, [filteredQuotes]);
 
   const shareQuote = async (): Promise<void> => {
     if (!bannerRef.current || sharing) return;
@@ -75,7 +79,7 @@ export default function QuoteBankScreen(): ReactElement {
             <Ionicons name="share-outline" size={13} color={colors.mutedChocolate} />
             <Text style={styles.shareText}>{sharing ? 'Preparing...' : 'Share quote'}</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" onPress={() => void copy(quoteOfDay.text)} style={styles.bannerActionBtn}>
+          <Pressable accessibilityRole="button" onPress={() => void copy(quoteWithAttribution(quoteOfDay))} style={styles.bannerActionBtn}>
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={13} color={copied ? colors.caramel : colors.mutedChocolate} />
             <Text style={[styles.shareText, copied && { color: colors.caramel }]}>{copied ? 'Copied!' : 'Copy quote'}</Text>
           </Pressable>
@@ -120,6 +124,14 @@ export default function QuoteBankScreen(): ReactElement {
 
   const header = <View>{banner}{headingRow}</View>;
 
+  // Reachable from either view, since both are filtered by the selected collection.
+  const emptyCollection = (
+    <View style={styles.empty}>
+      <Text style={styles.emptyTitle}>No quotes in this collection</Text>
+      <Text style={styles.emptyText}>Tap the bookmark icon on any saved quote to add it here.</Text>
+    </View>
+  );
+
   if (quotes.length === 0) {
     return (
       <ScrollView style={styles.scroll} contentContainerStyle={styles.page}>
@@ -140,6 +152,7 @@ export default function QuoteBankScreen(): ReactElement {
         data={authorGroups}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={header}
+        ListEmptyComponent={emptyCollection}
         renderItem={({ item }) => (
           <Pressable style={styles.authorCard} onPress={() => router.push(`/authors/${item.id}`)}>
             {authorPhotos[item.id] ? <Image source={authorPhotos[item.id]} style={styles.authorCardPhoto} /> : null}
@@ -158,12 +171,7 @@ export default function QuoteBankScreen(): ReactElement {
         data={filteredQuotes}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={header}
-        ListEmptyComponent={
-          <View style={styles.empty}>
-            <Text style={styles.emptyTitle}>No quotes in this collection</Text>
-            <Text style={styles.emptyText}>Tap the bookmark icon on any saved quote to add it here.</Text>
-          </View>
-        }
+        ListEmptyComponent={emptyCollection}
         renderItem={({ item }) => (
           <QuoteCard
             quote={item}

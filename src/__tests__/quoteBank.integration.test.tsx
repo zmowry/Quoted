@@ -2,7 +2,7 @@ import { Alert } from 'react-native';
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { renderWithProviders } from '@/src/test-utils';
+import { lastTriggerDate, renderWithProviders } from '@/src/test-utils';
 import QuoteBankScreen from '../../app/(tabs)/index';
 import SettingsScreen from '../../app/(tabs)/settings';
 import { AuthorDetail } from '../../app/(tabs)/authors/[authorId]';
@@ -45,9 +45,9 @@ describe('Quote Bank flows', () => {
     fireEvent.changeText(screen.getByLabelText('Notification minute'), '45');
     fireEvent.press(screen.getByRole('button', { name: 'PM' }));
     fireEvent.press(screen.getByRole('button', { name: 'Save notification time' }));
-    await waitFor(() => expect(Notifications.scheduleNotificationAsync).toHaveBeenLastCalledWith(
-      expect.objectContaining({ trigger: expect.objectContaining({ hour: 16, minute: 45 }) }),
-    ));
+    // Deliveries are dated one-offs, so the chosen time shows up as the trigger
+    // date's local clock time.
+    await waitFor(() => expect([lastTriggerDate().getHours(), lastTriggerDate().getMinutes()]).toEqual([16, 45]));
   });
 
   it('saving the same quote twice does not duplicate it in the bank', async () => {

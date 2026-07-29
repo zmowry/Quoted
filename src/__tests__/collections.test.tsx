@@ -6,6 +6,7 @@ import { AuthorDetail } from '../../app/(tabs)/authors/[authorId]';
 
 const BICYCLE = 'Life is like riding a bicycle. To keep your balance, you must keep moving.';
 const IMAGINATION = 'Imagination is more important than knowledge.';
+const GETTING_STARTED = 'The secret of getting ahead is getting started.';
 
 /** A collection name renders both in the sheet and in the filter chip row, so scope every lookup. */
 const sheet = () => within(screen.getByTestId('collection-sheet'));
@@ -114,6 +115,55 @@ describe('Collections', () => {
     fireEvent.press(sheet().getByText('Add'));
 
     await waitFor(() => expect(sheet().getByText('No collections yet. Create one below.')).toBeTruthy());
+  });
+
+  it('applies the selected collection to the author view as well', async () => {
+    // The chips stay on screen when grouping by author, so the two views have to
+    // agree about what is filtered; showing every author under a highlighted
+    // chip reads as the filter having silently failed.
+    const einstein = renderWithProviders(<AuthorDetail authorId="einstein" />);
+    await screen.findByText('Albert Einstein');
+    fireEvent.press(screen.getByLabelText(`Save ${BICYCLE}`));
+    await screen.findByLabelText(`Remove ${BICYCLE}`);
+    einstein.unmount();
+
+    const twain = renderWithProviders(<AuthorDetail authorId="twain" />);
+    await screen.findByText('Mark Twain');
+    fireEvent.press(screen.getByLabelText(`Save ${GETTING_STARTED}`));
+    await screen.findByLabelText(`Remove ${GETTING_STARTED}`);
+    twain.unmount();
+
+    renderWithProviders(<QuoteBankScreen />);
+    await screen.findByText('My saved quotes');
+    await waitFor(() => expect(screen.getAllByLabelText(/^Delete /i)).toHaveLength(2));
+
+    // Collect only the Einstein quote, saved first and so listed first.
+    fireEvent.press(screen.getAllByLabelText('Add to collection')[0]);
+    await screen.findByTestId('collection-sheet');
+    fireEvent.changeText(sheet().getByPlaceholderText('New collection name'), 'Motivation');
+    fireEvent.press(sheet().getByText('Add'));
+    await waitFor(() => expect(sheet().getByText('Motivation')).toBeTruthy());
+    fireEvent.press(sheet().getByText('Motivation'));
+    fireEvent.press(sheet().getByText('Done'));
+
+    fireEvent.press(await chips().findByText('Motivation'));
+    await waitFor(() => expect(screen.getAllByLabelText(/^Delete /i)).toHaveLength(1));
+    fireEvent.press(screen.getByLabelText('Group by author'));
+
+    await waitFor(() => expect(screen.queryByText('Mark Twain')).toBeNull());
+    expect(screen.getAllByText('Albert Einstein').length).toBeGreaterThan(0);
+  });
+
+  it('shows the empty-collection message in the author view too', async () => {
+    await seedTwoQuotesAndOpenBank();
+    await openSheetAndCreate('Someday');
+    fireEvent.press(sheet().getByText('Done'));
+
+    fireEvent.press(await chips().findByText('Someday'));
+    fireEvent.press(screen.getByLabelText('Group by author'));
+    // Filtering the author list down to nothing must explain itself rather than
+    // render a bare header.
+    await screen.findByText('No quotes in this collection');
   });
 
   it('deleting a quote also removes it from its collections', async () => {

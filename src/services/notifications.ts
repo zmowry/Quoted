@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
-import type { AdditionalQuotesSettings, NotificationTime, Quote } from '@/src/types';
+import { quoteWithAttribution } from '@/src/format';
+import type { AdditionalQuotesSettings, NotificationTime, PlannedDay } from '@/src/types';
 
 // SDK 53+ replaced the single `shouldShowAlert` flag with separate banner/list controls.
 Notifications.setNotificationHandler({
@@ -34,33 +35,57 @@ export async function cancelAllNotifications(): Promise<void> {
   }
 }
 
+/**
+ * iOS keeps at most 64 pending local notifications and silently drops the rest,
+ * so the plan is trimmed to leave headroom rather than risk losing its tail.
+ */
+export const MAX_PENDING = 60;
+
+const at = (day: Date, time: NotificationTime): Date => {
+  const when = new Date(day);
+  when.setHours(time.hour, time.minute, 0, 0);
+  return when;
+};
+
+/**
+ * Lays out one dated notification per quote per day.
+ *
+ * A repeating trigger cannot do this: it is a single notification object whose
+ * body is fixed when it is scheduled, so it replays the same quote forever. The
+ * OS will not wake the app at delivery time to swap the text either, which is
+ * why the rotation has to be written out in advance, one notification per day,
+ * and topped back up to the full horizon every time the app is opened.
+ */
 export async function scheduleAllNotifications(
   mainTime: NotificationTime,
-  mainQuote: Quote | undefined,
+  plan: PlannedDay[],
   additionalSettings?: AdditionalQuotesSettings,
-  allQuotes?: Quote[],
-  options?: { skipIfAlreadyScheduled?: boolean }
+  options?: { sound?: boolean; now?: Date }
 ): Promise<void> {
+  const sound = options?.sound ?? true;
+  const now = options?.now ?? new Date();
   try {
     if (!(await ensurePermission())) return;
-    if (options?.skipIfAlreadyScheduled) {
-      const existing = await Notifications.getAllScheduledNotificationsAsync();
-      if (existing.length > 0) return;
-    }
     await Notifications.cancelAllScheduledNotificationsAsync();
-    await Notifications.scheduleNotificationAsync({
-      content: { title: 'Daily Quote Bank', body: mainQuote ? `"${mainQuote.text}" -- ${mainQuote.authorName}` : 'No quotes saved!', sound: true },
-      trigger: { hour: mainTime.hour, minute: mainTime.minute, repeats: true, channelId: 'daily-quotes' } as Notifications.NotificationTriggerInput,
-    });
-    if (additionalSettings?.enabled && allQuotes && allQuotes.length > 0) {
-      const mainIdx = mainQuote ? allQuotes.findIndex((q) => q.id === mainQuote.id) : -1;
-      for (let i = 0; i < additionalSettings.count && i < additionalSettings.times.length; i++) {
-        const q = allQuotes[(mainIdx + 1 + i) % allQuotes.length];
-        const t = additionalSettings.times[i];
+    // Which quote each extra carries is decided by the plan, which draws them
+    // from the same cycle as the daily quote; only the times are settings.
+    const extraTimes = additionalSettings?.enabled ? additionalSettings.times.slice(0, additionalSettings.count) : [];
+    let scheduled = 0;
+    for (const { day, quote, extras } of plan) {
+      const occurrences = [{ when: at(day, mainTime), quote, title: 'Daily Quote Bank' }];
+      extraTimes.forEach((time, i) => {
+        if (extras[i]) occurrences.push({ when: at(day, time), quote: extras[i], title: 'Quote Bank' });
+      });
+      for (const occurrence of occurrences) {
+        // A date trigger in the past fires the moment it is scheduled, which
+        // would push today's already-delivered quote straight to the lock screen.
+        if (occurrence.when <= now) continue;
+        if (scheduled >= MAX_PENDING) return;
         await Notifications.scheduleNotificationAsync({
-          content: { title: 'Quote Bank', body: q ? `"${q.text}" -- ${q.authorName}` : 'No quotes saved!', sound: true },
-          trigger: { hour: t.hour, minute: t.minute, repeats: true, channelId: 'daily-quotes' } as Notifications.NotificationTriggerInput,
+          content: { title: occurrence.title, body: occurrence.quote ? quoteWithAttribution(occurrence.quote) : 'No quotes saved!', sound },
+          trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: occurrence.when, channelId: 'daily-quotes' },
         });
+        scheduled++;
       }
     }
   } catch {

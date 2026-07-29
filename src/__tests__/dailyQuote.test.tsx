@@ -9,6 +9,8 @@ import QuoteBankScreen from '../../app/(tabs)/index';
 import { AuthorDetail } from '../../app/(tabs)/authors/[authorId]';
 
 const BICYCLE = 'Life is like riding a bicycle. To keep your balance, you must keep moving.';
+const IMAGINATION = 'Imagination is more important than knowledge.';
+const BICYCLE_ATTRIBUTED = `"${BICYCLE}" -- Albert Einstein`;
 
 async function saveQuoteAndOpenBank(authorId: string, text: string): Promise<void> {
   const author = renderWithProviders(<AuthorDetail authorId={authorId} />);
@@ -44,7 +46,8 @@ describe('Quote of the day banner', () => {
   it('copies the daily quote to the clipboard and confirms', async () => {
     await saveQuoteAndOpenBank('einstein', BICYCLE);
     fireEvent.press(screen.getByText('Copy quote'));
-    await waitFor(() => expect(Clipboard.setStringAsync).toHaveBeenCalledWith(BICYCLE));
+    // Attribution travels with the text; a pasted quote should not be anonymous.
+    await waitFor(() => expect(Clipboard.setStringAsync).toHaveBeenCalledWith(BICYCLE_ATTRIBUTED));
     await screen.findByText('Copied!');
   });
 
@@ -68,6 +71,43 @@ describe('Quote of the day banner', () => {
     expect(shareAsync).not.toHaveBeenCalled();
   });
 
+  it('shows the same quote when the app is reopened later the same day', async () => {
+    const author = renderWithProviders(<AuthorDetail authorId="einstein" />);
+    await screen.findByLabelText(`Save ${BICYCLE}`);
+    fireEvent.press(screen.getByLabelText(`Save ${BICYCLE}`));
+    await screen.findByLabelText(`Remove ${BICYCLE}`);
+    fireEvent.press(screen.getByLabelText(`Save ${IMAGINATION}`));
+    await screen.findByLabelText(`Remove ${IMAGINATION}`);
+    author.unmount();
+
+    // Reopening used to advance the cycle, so the bank burned through a quote on
+    // every launch while the pending notification still held the first one.
+    for (let launch = 0; launch < 3; launch++) {
+      const bank = renderWithProviders(<QuoteBankScreen />);
+      await screen.findByText('My saved quotes');
+      await flushPending();
+      await waitFor(() => expect(screen.getByText(`“${BICYCLE}”`)).toBeTruthy());
+      bank.unmount();
+    }
+  });
+
+  it('advances to another quote when the user asks for a refresh', async () => {
+    const author = renderWithProviders(<AuthorDetail authorId="einstein" />);
+    await screen.findByLabelText(`Save ${BICYCLE}`);
+    fireEvent.press(screen.getByLabelText(`Save ${BICYCLE}`));
+    await screen.findByLabelText(`Remove ${BICYCLE}`);
+    fireEvent.press(screen.getByLabelText(`Save ${IMAGINATION}`));
+    await screen.findByLabelText(`Remove ${IMAGINATION}`);
+    author.unmount();
+
+    renderWithProviders(<QuoteBankScreen />);
+    await screen.findByText('My saved quotes');
+    await waitFor(() => expect(screen.getByText(`“${BICYCLE}”`)).toBeTruthy());
+    // Holding a day's quote steady must not disable the explicit Refresh action.
+    fireEvent.press(screen.getByText('Refresh'));
+    await waitFor(() => expect(screen.getByText(`“${IMAGINATION}”`)).toBeTruthy());
+  });
+
   it('links from the banner to the author detail route', async () => {
     await saveQuoteAndOpenBank('einstein', BICYCLE);
     fireEvent.press(screen.getByText('More from this author'));
@@ -79,7 +119,7 @@ describe('Saved quote list', () => {
   it('copies an individual quote from its card', async () => {
     await saveQuoteAndOpenBank('einstein', BICYCLE);
     fireEvent.press(screen.getByLabelText('Copy quote'));
-    await waitFor(() => expect(Clipboard.setStringAsync).toHaveBeenCalledWith(BICYCLE));
+    await waitFor(() => expect(Clipboard.setStringAsync).toHaveBeenCalledWith(BICYCLE_ATTRIBUTED));
   });
 
   it('groups saved quotes by author and back again', async () => {

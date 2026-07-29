@@ -7,7 +7,7 @@ import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { TextSize } from '@/src/hooks/useTheme';
 import type { Colors, ThemeMode } from '@/src/theme';
-import type { AdditionalQuotesSettings, NotificationTime } from '@/src/types';
+import type { AdditionalQuotesSettings, NotificationTime, QuoteOrder } from '@/src/types';
 
 const pad = (value: number): string => value.toString().padStart(2, '0');
 type Meridiem = 'AM' | 'PM';
@@ -48,7 +48,7 @@ function TimePicker({ value, label, onChange, compact = false, colors, scale }: 
 }
 
 export default function SettingsScreen(): ReactElement {
-  const { notificationTime, additionalQuotes, quotes, collections, loading, updateNotificationTime, updateAdditionalQuotes, clearAllData } = useQuoteBank();
+  const { notificationTime, additionalQuotes, quotes, collections, loading, updateNotificationTime, updateAdditionalQuotes, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled } = useQuoteBank();
   const { colors, mode, resolvedMode, setMode, textSize, setTextSize, scale } = useTheme();
   const { status: permissionStatus, request: requestPermission, openSystemSettings } = useNotificationPermission();
   // 'unknown' means the check itself failed; stay quiet rather than raise a false alarm.
@@ -98,6 +98,11 @@ export default function SettingsScreen(): ReactElement {
     { value: 'light', label: 'Light' },
     { value: 'dark', label: 'Dark' },
     { value: 'system', label: 'System' },
+  ];
+
+  const orderOptions: { value: QuoteOrder; label: string }[] = [
+    { value: 'sequential', label: 'In order' },
+    { value: 'shuffle', label: 'Shuffle' },
   ];
 
   const textSizeOptions: { value: TextSize; label: string }[] = [
@@ -205,6 +210,32 @@ export default function SettingsScreen(): ReactElement {
               {({ pressed }) => <Text style={styles.buttonText}>{pressed ? 'Saving...' : 'Save notification time'}</Text>}
             </Pressable>
             {mainSaved ? <Text style={styles.savedMsg}>(Setting saved)</Text> : null}
+
+            <Text style={[styles.label, { marginTop: 18 }]}>Which quote comes next</Text>
+            <View style={styles.modeRow}>
+              {orderOptions.map(({ value, label }) => (
+                <Pressable key={value} accessibilityRole="button" onPress={() => void updateQuoteOrder(value)} style={[styles.modeBtn, quoteOrder === value && styles.modeBtnActive]}>
+                  <Text style={[styles.modeBtnText, quoteOrder === value && styles.modeBtnTextActive]}>{label}</Text>
+                </Pressable>
+              ))}
+            </View>
+            <Text style={styles.copy}>
+              {quoteOrder === 'shuffle'
+                ? 'Picks at random, still showing every saved quote once before any repeats.'
+                : 'Works through your saved quotes in the order you saved them.'}
+            </Text>
+
+            <View style={styles.yesNoRow}>
+              <Text style={styles.label}>Play a sound?</Text>
+              <View style={styles.toggle}>
+                <Pressable accessibilityRole="button" onPress={() => void updateSoundEnabled(false)} style={[styles.toggleBtn, !soundEnabled && styles.toggleActive]}>
+                  <Text style={[styles.toggleText, !soundEnabled && styles.toggleTextActive]}>No</Text>
+                </Pressable>
+                <Pressable accessibilityRole="button" onPress={() => void updateSoundEnabled(true)} style={[styles.toggleBtn, soundEnabled && styles.toggleActive]}>
+                  <Text style={[styles.toggleText, soundEnabled && styles.toggleTextActive]}>Yes</Text>
+                </Pressable>
+              </View>
+            </View>
           </View>
         ) : null}
       </View>
