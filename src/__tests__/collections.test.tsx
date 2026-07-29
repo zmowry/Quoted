@@ -1,4 +1,4 @@
-import { fireEvent, screen, waitFor, within } from '@testing-library/react-native';
+import { act, fireEvent, screen, waitFor, within } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { flushPending, renderWithProviders } from '@/src/test-utils';
 import QuoteBankScreen from '../../app/(tabs)/index';
@@ -178,6 +178,86 @@ describe('Collections', () => {
 
     fireEvent.press(await chips().findByText('Motivation'));
     await screen.findByText('No quotes in this collection');
+  });
+});
+
+describe('Undoing a delete', () => {
+  it('offers an undo after a quote is deleted', async () => {
+    await seedTwoQuotesAndOpenBank();
+    fireEvent.press(screen.getByLabelText(`Delete ${BICYCLE}`));
+    await flushPending();
+
+    await screen.findByText('Quote removed');
+    expect(screen.getByLabelText('Undo delete')).toBeTruthy();
+  });
+
+  it('restores the deleted quote when undo is pressed', async () => {
+    await seedTwoQuotesAndOpenBank();
+    fireEvent.press(screen.getByLabelText(`Delete ${BICYCLE}`));
+    await flushPending();
+    await waitFor(() => expect(screen.queryByLabelText(`Delete ${BICYCLE}`)).toBeNull());
+
+    fireEvent.press(screen.getByLabelText('Undo delete'));
+    await flushPending();
+
+    await screen.findByLabelText(`Delete ${BICYCLE}`);
+    await waitFor(() => expect(screen.getAllByLabelText(/^Delete /i)).toHaveLength(2));
+    // The affordance is single-use; leaving it up would invite a second restore.
+    expect(screen.queryByText('Quote removed')).toBeNull();
+  });
+
+  it('puts the restored quote back into the collections it was filed under', async () => {
+    await seedTwoQuotesAndOpenBank();
+    await openSheetAndCreate('Motivation');
+    fireEvent.press(sheet().getByText('Motivation'));
+    fireEvent.press(sheet().getByText('Done'));
+
+    fireEvent.press(await screen.findByLabelText(`Delete ${BICYCLE}`));
+    await flushPending();
+    fireEvent.press(screen.getByLabelText('Undo delete'));
+    await flushPending();
+
+    // Deleting strips collection membership, so restoring only the quote would
+    // silently empty the collection it used to belong to.
+    fireEvent.press(await chips().findByText('Motivation'));
+    await waitFor(() => expect(screen.getByLabelText(`Delete ${BICYCLE}`)).toBeTruthy());
+  });
+
+  it('keeps the undo reachable after the last quote is deleted', async () => {
+    const author = renderWithProviders(<AuthorDetail authorId="einstein" />);
+    await screen.findByText('Albert Einstein');
+    fireEvent.press(screen.getByLabelText(`Save ${BICYCLE}`));
+    await screen.findByLabelText(`Remove ${BICYCLE}`);
+    author.unmount();
+
+    renderWithProviders(<QuoteBankScreen />);
+    await screen.findByText('My saved quotes');
+    await waitFor(() => expect(screen.getAllByLabelText(/^Delete /i)).toHaveLength(1));
+
+    fireEvent.press(screen.getByLabelText(`Delete ${BICYCLE}`));
+    await flushPending();
+
+    // Emptying the bank swaps in the empty-state screen; the undo has to survive
+    // that switch or the very deletion most worth undoing cannot be.
+    await screen.findByText('Your quote bank is empty');
+    fireEvent.press(screen.getByLabelText('Undo delete'));
+    await flushPending();
+    await screen.findByLabelText(`Delete ${BICYCLE}`);
+  });
+
+  it('withdraws the undo once its window has passed', async () => {
+    jest.useFakeTimers();
+    try {
+      await seedTwoQuotesAndOpenBank();
+      fireEvent.press(screen.getByLabelText(`Delete ${BICYCLE}`));
+      await act(async () => { await Promise.resolve(); });
+      expect(screen.getByText('Quote removed')).toBeTruthy();
+
+      // A banner that never expires becomes permanent furniture.
+      await act(async () => { jest.advanceTimersByTime(6000); });
+      expect(screen.queryByText('Quote removed')).toBeNull();
+      expect(screen.queryByLabelText('Undo delete')).toBeNull();
+    } finally { jest.useRealTimers(); }
   });
 });
 

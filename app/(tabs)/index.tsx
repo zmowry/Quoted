@@ -18,7 +18,7 @@ import { authorPhotos } from '@/src/data/authorPhotos';
 type AuthorGroup = { id: string; authorName: string };
 
 export default function QuoteBankScreen(): ReactElement {
-  const { quotes, quoteOfDay, loading, removeQuote, refreshQuoteOfDay, collections, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection } = useQuoteBank();
+  const { quotes, quoteOfDay, loading, removeQuote, lastRemoved, undoRemove, refreshQuoteOfDay, collections, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection } = useQuoteBank();
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const router = useRouter();
@@ -151,54 +151,61 @@ export default function QuoteBankScreen(): ReactElement {
     </View>
   );
 
-  if (quotes.length === 0) {
-    return (
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.page}>
-        {header}
-        <View style={styles.empty}>
-          <Text style={styles.emptyTitle}>Your quote bank is empty</Text>
-          <Text style={styles.emptyText}>Explore authors and save the words you want to revisit.</Text>
-        </View>
-      </ScrollView>
-    );
-  }
-
-  if (viewMode === 'author') {
-    return (
-      <FlatList<AuthorGroup>
-        style={styles.scroll}
-        contentContainerStyle={styles.page}
-        data={authorGroups}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={header}
-        ListEmptyComponent={emptyResults}
-        renderItem={({ item }) => (
-          <Pressable style={styles.authorCard} onPress={() => router.push(`/authors/${item.id}`)}>
-            {authorPhotos[item.id] ? <Image source={authorPhotos[item.id]} style={styles.authorCardPhoto} /> : null}
-            <Text style={styles.authorCardName}>{item.authorName}</Text>
-          </Pressable>
-        )}
-      />
-    );
-  }
+  // Deleting the last quote drops straight through to the empty state, so the
+  // undo affordance has to outlive whichever branch rendered the trash icon.
+  const body = quotes.length === 0 ? (
+    <ScrollView style={styles.scroll} contentContainerStyle={styles.page}>
+      {header}
+      <View style={styles.empty}>
+        <Text style={styles.emptyTitle}>Your quote bank is empty</Text>
+        <Text style={styles.emptyText}>Explore authors and save the words you want to revisit.</Text>
+      </View>
+    </ScrollView>
+  ) : viewMode === 'author' ? (
+    <FlatList<AuthorGroup>
+      style={styles.scroll}
+      contentContainerStyle={styles.page}
+      data={authorGroups}
+      keyExtractor={(item) => item.id}
+      ListHeaderComponent={header}
+      ListEmptyComponent={emptyResults}
+      renderItem={({ item }) => (
+        <Pressable style={styles.authorCard} onPress={() => router.push(`/authors/${item.id}`)}>
+          {authorPhotos[item.id] ? <Image source={authorPhotos[item.id]} style={styles.authorCardPhoto} /> : null}
+          <Text style={styles.authorCardName}>{item.authorName}</Text>
+        </Pressable>
+      )}
+    />
+  ) : (
+    <FlatList
+      style={styles.scroll}
+      contentContainerStyle={styles.page}
+      data={filteredQuotes}
+      keyExtractor={(item) => item.id}
+      ListHeaderComponent={header}
+      ListEmptyComponent={emptyResults}
+      renderItem={({ item }) => (
+        <QuoteCard
+          quote={item}
+          onDelete={() => void removeQuote(item.id)}
+          onTag={() => setTaggedQuote(item)}
+        />
+      )}
+    />
+  );
 
   return (
     <>
-      <FlatList
-        style={styles.scroll}
-        contentContainerStyle={styles.page}
-        data={filteredQuotes}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={header}
-        ListEmptyComponent={emptyResults}
-        renderItem={({ item }) => (
-          <QuoteCard
-            quote={item}
-            onDelete={() => void removeQuote(item.id)}
-            onTag={() => setTaggedQuote(item)}
-          />
-        )}
-      />
+      {body}
+      {lastRemoved ? (
+        <View style={styles.undoBar}>
+          <Text style={styles.undoText} numberOfLines={1}>Quote removed</Text>
+          <Pressable accessibilityRole="button" accessibilityLabel="Undo delete" onPress={() => void undoRemove()} style={styles.undoBtn}>
+            <Ionicons name="arrow-undo-outline" size={14} color={colors.gold} />
+            <Text style={styles.undoAction}>Undo</Text>
+          </Pressable>
+        </View>
+      ) : null}
       <CollectionModal
         quote={taggedQuote}
         collections={collections}
@@ -249,5 +256,9 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     empty: { alignItems: 'center', padding: 30, backgroundColor: colors.white, borderRadius: 16, borderWidth: 1, borderColor: colors.border },
     emptyTitle: { fontSize: scale(18), fontWeight: '800', color: colors.chocolate },
     emptyText: { color: colors.mutedChocolate, textAlign: 'center', marginTop: 8, lineHeight: scale(21), fontSize: scale(14) },
+    undoBar: { position: 'absolute', left: 16, right: 16, bottom: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: colors.chocolate, borderRadius: 12, paddingVertical: 10, paddingHorizontal: 14, shadowColor: colors.chocolate, shadowOpacity: .3, shadowRadius: 10, elevation: 6 },
+    undoText: { color: colors.softCream, fontSize: scale(13), fontWeight: '600', flex: 1 },
+    undoBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingLeft: 12 },
+    undoAction: { color: colors.gold, fontSize: scale(13), fontWeight: '800' },
   });
 }

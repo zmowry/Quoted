@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { router } from 'expo-router';
 import { renderWithProviders } from '@/src/test-utils';
+import { authorsData } from '@/src/data/authorsData';
 import AuthorsScreen from '../../app/(tabs)/authors/index';
 import { AuthorDetail } from '../../app/(tabs)/authors/[authorId]';
 
@@ -88,6 +89,64 @@ describe('Authors list', () => {
     renderWithProviders(<AuthorsScreen />);
     fireEvent.changeText(screen.getByLabelText('Search authors'), 'zzzzz');
     await waitFor(() => expect(screen.queryByText('Matching quotes')).toBeNull());
+  });
+});
+
+/** The surprise quote is random, so it is identified via its own save control. */
+const surprisedText = (): string =>
+  String(screen.getByLabelText(/^(Save|Remove) /).props.accessibilityLabel).replace(/^(Save|Remove) /, '');
+
+describe('Surprise me', () => {
+  it('shows nothing until the button is pressed', async () => {
+    renderWithProviders(<AuthorsScreen />);
+    await screen.findByLabelText('Surprise me');
+    expect(screen.queryByLabelText('Dismiss surprise quote')).toBeNull();
+  });
+
+  it('surfaces a random quote from the full catalogue', async () => {
+    renderWithProviders(<AuthorsScreen />);
+    fireEvent.press(screen.getByLabelText('Surprise me'));
+
+    await screen.findByLabelText('Dismiss surprise quote');
+    // Whatever landed has to be a real quote with a real author attached.
+    const text = surprisedText();
+    const source = authorsData.find((a) => a.quotes.some((q) => q.text === text));
+    expect(source).toBeTruthy();
+    expect(screen.getByText(`-- ${source!.name}`)).toBeTruthy();
+  });
+
+  it('draws a different quote each time it is pressed', async () => {
+    renderWithProviders(<AuthorsScreen />);
+    fireEvent.press(screen.getByLabelText('Surprise me'));
+    await screen.findByLabelText('Dismiss surprise quote');
+    const first = surprisedText();
+
+    // Re-rolling onto the quote already on screen would look like a dead button,
+    // so the current pick is excluded from the draw rather than left to chance.
+    fireEvent.press(screen.getByLabelText('Surprise me'));
+    await waitFor(() => expect(surprisedText()).not.toBe(first));
+  });
+
+  it('saves the surprised quote into the bank', async () => {
+    renderWithProviders(<AuthorsScreen />);
+    fireEvent.press(screen.getByLabelText('Surprise me'));
+    await screen.findByLabelText('Dismiss surprise quote');
+    const text = surprisedText();
+
+    fireEvent.press(screen.getByLabelText(`Save ${text}`));
+    await screen.findByLabelText(`Remove ${text}`);
+    expect(screen.getByText('- Remove')).toBeTruthy();
+  });
+
+  it('clears the card when dismissed', async () => {
+    renderWithProviders(<AuthorsScreen />);
+    fireEvent.press(screen.getByLabelText('Surprise me'));
+    await screen.findByLabelText('Dismiss surprise quote');
+
+    fireEvent.press(screen.getByLabelText('Dismiss surprise quote'));
+    await waitFor(() => expect(screen.queryByLabelText('Dismiss surprise quote')).toBeNull());
+    // The button itself stays, ready for another draw.
+    expect(screen.getByLabelText('Surprise me')).toBeTruthy();
   });
 });
 

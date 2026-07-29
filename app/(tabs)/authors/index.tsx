@@ -2,8 +2,11 @@ import { useMemo, useState } from 'react';
 import type { ReactElement } from 'react';
 import { FlatList, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { router } from 'expo-router';
+import { Ionicons } from '@expo/vector-icons';
+import { QuoteCard } from '@/src/components/QuoteCard';
 import { authorsData } from '@/src/data/authorsData';
 import { authorPhotos } from '@/src/data/authorPhotos';
+import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { Colors } from '@/src/theme';
 import type { Author, Quote } from '@/src/types';
@@ -21,8 +24,25 @@ function firstName(name: string): string { return name.trim().split(' ')[0]; }
 export default function AuthorsScreen(): ReactElement {
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
+  const { quotes, saveQuote, removeQuote } = useQuoteBank();
   const [search, setSearch] = useState('');
   const [sortMode, setSortMode] = useState<SortMode>('last');
+  const [surprise, setSurprise] = useState<Quote | null>(null);
+
+  const allQuotes = useMemo<Quote[]>(
+    () => authorsData.flatMap((a) => a.quotes.map((q): Quote => ({ ...q, authorName: a.name }))),
+    [],
+  );
+
+  // Drawing from everything except what is already showing: a re-roll that lands
+  // on the same quote reads as the button being broken.
+  const roll = (): void => {
+    const pool = surprise ? allQuotes.filter((q) => q.id !== surprise.id) : allQuotes;
+    if (!pool.length) return;
+    setSurprise(pool[Math.floor(Math.random() * pool.length)]);
+  };
+
+  const surpriseSaved = surprise ? quotes.some((q) => q.id === surprise.id) : false;
 
   const authors = useMemo(() => {
     const filtered = authorsData.filter((a) => a.name.toLowerCase().includes(search.toLowerCase()));
@@ -60,6 +80,10 @@ export default function AuthorsScreen(): ReactElement {
         placeholderTextColor={colors.taupe}
         style={styles.search}
       />
+      <Pressable accessibilityRole="button" accessibilityLabel="Surprise me" onPress={roll} style={styles.surpriseBtn}>
+        <Ionicons name="sparkles" size={13} color={colors.gold} />
+        <Text style={styles.surpriseBtnText}>Surprise me</Text>
+      </Pressable>
       <View style={styles.sortRow}>
         <Text style={styles.sortLabel}>Sort by</Text>
         <View style={styles.toggle}>
@@ -74,6 +98,24 @@ export default function AuthorsScreen(): ReactElement {
       <FlatList
         data={rows}
         keyExtractor={(row) => row.kind === 'author' ? row.author.id : row.kind === 'header' ? row.label : row.quote.id}
+        ListHeaderComponent={surprise ? (
+          <View style={styles.surpriseCard}>
+            <QuoteCard quote={surprise} />
+            <View style={styles.surpriseActions}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={surpriseSaved ? `Remove ${surprise.text}` : `Save ${surprise.text}`}
+                onPress={() => void (surpriseSaved ? removeQuote(surprise.id) : saveQuote(surprise))}
+                style={styles.surpriseAction}
+              >
+                <Text style={styles.surpriseActionText}>{surpriseSaved ? '- Remove' : '+ Save'}</Text>
+              </Pressable>
+              <Pressable accessibilityRole="button" accessibilityLabel="Dismiss surprise quote" onPress={() => setSurprise(null)} style={styles.surpriseAction}>
+                <Text style={styles.surpriseActionText}>Dismiss</Text>
+              </Pressable>
+            </View>
+          </View>
+        ) : null}
         renderItem={({ item }) => {
           if (item.kind === 'header') return <Text style={styles.sectionHeader}>{item.label}</Text>;
           if (item.kind === 'quote') {
@@ -109,6 +151,12 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
   return StyleSheet.create({
     page: { flex: 1, padding: 16, backgroundColor: colors.cream },
     search: { backgroundColor: colors.white, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10, fontSize: scale(16), color: colors.chocolate },
+    surpriseBtn: { flexDirection: 'row', alignSelf: 'flex-start', alignItems: 'center', gap: 5, backgroundColor: colors.chocolate, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 12, marginBottom: 12 },
+    surpriseBtnText: { color: colors.white, fontSize: scale(12), fontWeight: '800' },
+    surpriseCard: { marginBottom: 14, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: colors.border },
+    surpriseActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+    surpriseAction: { paddingVertical: 6, paddingHorizontal: 12, borderRadius: 8, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
+    surpriseActionText: { fontSize: scale(12), fontWeight: '700', color: colors.mutedChocolate },
     sortRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 },
     sortLabel: { fontSize: scale(14), fontWeight: '700', color: colors.mutedChocolate },
     toggle: { flexDirection: 'row', backgroundColor: colors.border, borderRadius: 8, padding: 2, gap: 2 },

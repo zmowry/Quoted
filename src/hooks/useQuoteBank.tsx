@@ -16,6 +16,13 @@ const QuoteBankContext = createContext<QuoteBankContextValue | undefined>(undefi
  */
 const SCHEDULE_HORIZON_DAYS = 14;
 
+/**
+ * How long a deleted quote stays recoverable. Deleting is otherwise permanent
+ * and there is no backup, so a mis-tap on the trash icon costs the quote for
+ * good; long enough to notice and react, short enough not to linger on screen.
+ */
+const UNDO_WINDOW_MS = 6000;
+
 const uid = () => Math.random().toString(36).slice(2);
 
 export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement {
@@ -27,6 +34,13 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
   const [quoteOrder, setQuoteOrder] = useState<QuoteOrder>(DEFAULT_QUOTE_ORDER);
   const [soundEnabled, setSoundEnabled] = useState(DEFAULT_SOUND_ENABLED);
   const [loading, setLoading] = useState(true);
+  const [lastRemoved, setLastRemoved] = useState<Quote>();
+
+  // The collections a removed quote belonged to are stripped on delete, so they
+  // are held alongside it — restoring the quote without them would silently drop
+  // whichever collections the user had filed it under.
+  const removed = useRef<{ quote: Quote; collectionIds: string[] } | null>(null);
+  const undoTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   // The day the current schedule was built for. Guards the foreground re-sync so
   // returning to the app repeatedly within one day does not churn the schedule.
@@ -58,6 +72,17 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
     pending.current = pending.current.then(run, run);
     return pending.current;
   }, []);
+
+  const clearUndo = useCallback(() => {
+    if (undoTimer.current) clearTimeout(undoTimer.current);
+    undoTimer.current = undefined;
+    removed.current = null;
+    setLastRemoved(undefined);
+  }, []);
+
+  // The window is held in a timer rather than checked on read, so the banner
+  // clears itself instead of waiting for the next render to notice it expired.
+  useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const refreshQuoteOfDay = useCallback(async () => {
     const latest = await quoteStorage.getQuotes();
@@ -109,6 +134,8 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
   }, [notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
   const removeQuote = useCallback(async (id: string) => {
+    const doomed = quotes.find((q) => q.id === id);
+    const filedUnder = collections.filter((c) => c.quoteIds.includes(id)).map((c) => c.id);
     const next = await quoteStorage.deleteQuote(id);
     setQuotes(next); await reconcileQueue(next);
     // Every planned day still carries the deleted quote's text in the OS, so the
@@ -118,7 +145,33 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
     // remove from all collections
     const updated = collections.map((c) => ({ ...c, quoteIds: c.quoteIds.filter((qid) => qid !== id) }));
     setCollections(updated); await quoteStorage.setCollections(updated);
-  }, [collections, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+    // Only the most recent delete is recoverable; a second one replaces the first
+    // rather than queueing, so undo always means "the one you just did".
+    if (doomed) {
+      if (undoTimer.current) clearTimeout(undoTimer.current);
+      removed.current = { quote: doomed, collectionIds: filedUnder };
+      setLastRemoved(doomed);
+      undoTimer.current = setTimeout(() => { removed.current = null; setLastRemoved(undefined); }, UNDO_WINDOW_MS);
+    }
+  }, [collections, quotes, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+
+  const undoRemove = useCallback(async () => {
+    const pending = removed.current;
+    if (!pending) return;
+    // Cleared up front so a double-tap on Undo cannot restore the quote twice.
+    clearUndo();
+    const next = await quoteStorage.saveQuote(pending.quote);
+    setQuotes(next); await reconcileQueue(next);
+    await resetPlanFrom(dateKey(), next);
+    await syncSchedule(next, notificationTime, additionalQuotes, quoteOrder, soundEnabled);
+    if (!pending.collectionIds.length) return;
+    // A collection deleted during the undo window is simply gone; the quote comes
+    // back to whichever of its collections still exist.
+    const restored = collections.map((c) => pending.collectionIds.includes(c.id) && !c.quoteIds.includes(pending.quote.id)
+      ? { ...c, quoteIds: [...c.quoteIds, pending.quote.id] }
+      : c);
+    setCollections(restored); await quoteStorage.setCollections(restored);
+  }, [clearUndo, collections, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
   const updateNotificationTime = useCallback(async (time: NotificationTime) => {
     await quoteStorage.setNotificationTime(time); setTime(time);
@@ -149,11 +202,14 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
     // notifications than leave quotes surfacing from a half-erased bank.
     await cancelAllNotifications();
     await quoteStorage.clearAll();
+    // Undoing back into a bank the user just wiped would resurrect exactly what
+    // they asked to be rid of.
+    clearUndo();
     setQuotes([]); setQuoteOfDay(undefined); setCollections([]);
     setTime(DEFAULT_NOTIFICATION_TIME);
     setAdditionalQuotes(DEFAULT_EXTRA_QUOTES);
     setQuoteOrder(DEFAULT_QUOTE_ORDER); setSoundEnabled(DEFAULT_SOUND_ENABLED);
-  }, []);
+  }, [clearUndo]);
 
   const addCollection = useCallback(async (name: string): Promise<Collection> => {
     const col: Collection = { id: uid(), name: name.trim(), quoteIds: [] };
@@ -178,7 +234,7 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
   }, [collections]);
 
   return (
-    <QuoteBankContext.Provider value={{ quotes, quoteOfDay, notificationTime, additionalQuotes, collections, loading, saveQuote, removeQuote, refreshQuoteOfDay, updateNotificationTime, updateAdditionalQuotes, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled }}>
+    <QuoteBankContext.Provider value={{ quotes, quoteOfDay, notificationTime, additionalQuotes, collections, loading, saveQuote, removeQuote, lastRemoved, undoRemove, refreshQuoteOfDay, updateNotificationTime, updateAdditionalQuotes, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled }}>
       {children}
     </QuoteBankContext.Provider>
   );
