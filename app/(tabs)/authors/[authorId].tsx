@@ -67,7 +67,7 @@ export function AuthorDetail({ authorId }: { authorId: string }): ReactElement {
               <CopyButton quote={quote} />
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel={saved ? `Remove ${quote.text}` : `Save ${quote.text}`} style={[styles.save, saved && styles.remove]} onPress={() => void (saved ? removeQuote(quote.id) : saveQuote(quote))}>
-              <Text style={styles.saveText}>{saved ? 'Remove from My Bank' : '+ Save to My Bank'}</Text>
+              <Text style={styles.saveText}>{saved ? 'Remove from My Bank' : '+ Save'}</Text>
             </Pressable>
           </View>
         );

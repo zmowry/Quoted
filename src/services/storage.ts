@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { AdditionalQuotesSettings, Collection, DailyAssignments, NotificationTime, QueueState, Quote, QuoteOrder } from '@/src/types';
 
 export const DEFAULT_NOTIFICATION_TIME: NotificationTime = { hour: 9, minute: 0 };
-export const DEFAULT_QUOTE_ORDER: QuoteOrder = 'sequential';
+export const DEFAULT_QUOTE_ORDER: QuoteOrder = 'shuffle';
 export const DEFAULT_SOUND_ENABLED = true;
 export const DEFAULT_EXTRA_QUOTES: AdditionalQuotesSettings = { enabled: false, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 0 }, { hour: 6, minute: 0 }, { hour: 15, minute: 0 }, { hour: 18, minute: 0 }] };
 const DEFAULT_EXTRA = DEFAULT_EXTRA_QUOTES;

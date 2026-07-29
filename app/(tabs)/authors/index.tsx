@@ -6,8 +6,14 @@ import { authorsData } from '@/src/data/authorsData';
 import { authorPhotos } from '@/src/data/authorPhotos';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { Colors } from '@/src/theme';
+import type { Author, Quote } from '@/src/types';
 
 type SortMode = 'last' | 'first';
+
+type ResultRow =
+  | { kind: 'author'; author: Author }
+  | { kind: 'header'; label: string }
+  | { kind: 'quote'; quote: Quote };
 
 function lastName(name: string): string { const parts = name.trim().split(' '); return parts[parts.length - 1]; }
 function firstName(name: string): string { return name.trim().split(' ')[0]; }
@@ -24,13 +30,33 @@ export default function AuthorsScreen(): ReactElement {
     return [...filtered].sort((a, b) => key(a.name).localeCompare(key(b.name)));
   }, [search, sortMode]);
 
+  // Authors whose name already matched get their own row above, so a quote of
+  // theirs would be redundant here — this section is only for the author you
+  // would not have found by browsing name matches alone.
+  const quoteMatches = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return [];
+    const matchedIds = new Set(authors.map((a) => a.id));
+    return authorsData
+      .filter((a) => !matchedIds.has(a.id))
+      .flatMap((a) => a.quotes
+        .filter((q) => q.text.toLowerCase().includes(query))
+        .map((q): Quote => ({ ...q, authorName: a.name })));
+  }, [search, authors]);
+
+  const rows = useMemo<ResultRow[]>(() => {
+    const authorRows: ResultRow[] = authors.map((author) => ({ kind: 'author', author }));
+    if (!quoteMatches.length) return authorRows;
+    return [...authorRows, { kind: 'header', label: 'Matching quotes' }, ...quoteMatches.map((quote): ResultRow => ({ kind: 'quote', quote }))];
+  }, [authors, quoteMatches]);
+
   return (
     <View style={styles.page}>
       <TextInput
         accessibilityLabel="Search authors"
         value={search}
         onChangeText={setSearch}
-        placeholder="Search authors"
+        placeholder="Search authors or quotes"
         placeholderTextColor={colors.taupe}
         style={styles.search}
       />
@@ -46,21 +72,34 @@ export default function AuthorsScreen(): ReactElement {
         </View>
       </View>
       <FlatList
-        data={authors}
-        keyExtractor={(author) => author.id}
-        renderItem={({ item }) => (
-          <Pressable accessibilityRole="button" style={styles.row} onPress={() => router.push(`/authors/${item.id}`)}>
-            <View style={styles.textCol}>
-              <Text style={styles.name}>{item.name}</Text>
-              <Text style={styles.bio} numberOfLines={1}>{item.bio}</Text>
-            </View>
-            <View style={styles.photoSlot}>
-              {authorPhotos[item.id]
-                ? <Image source={authorPhotos[item.id]} style={styles.photo} />
-                : <View style={[styles.photo, styles.photoPlaceholder]}><Text style={styles.photoInitial}>{item.name.charAt(0)}</Text></View>}
-            </View>
-          </Pressable>
-        )}
+        data={rows}
+        keyExtractor={(row) => row.kind === 'author' ? row.author.id : row.kind === 'header' ? row.label : row.quote.id}
+        renderItem={({ item }) => {
+          if (item.kind === 'header') return <Text style={styles.sectionHeader}>{item.label}</Text>;
+          if (item.kind === 'quote') {
+            const { quote } = item;
+            return (
+              <Pressable accessibilityRole="button" accessibilityLabel={`View quotes by ${quote.authorName}`} style={styles.quoteRow} onPress={() => router.push(`/authors/${quote.authorId}`)}>
+                <Text style={styles.quoteText} numberOfLines={3}>&ldquo;{quote.text}&rdquo;</Text>
+                <Text style={styles.quoteAuthor}>-- {quote.authorName}</Text>
+              </Pressable>
+            );
+          }
+          const { author } = item;
+          return (
+            <Pressable accessibilityRole="button" style={styles.row} onPress={() => router.push(`/authors/${author.id}`)}>
+              <View style={styles.textCol}>
+                <Text style={styles.name}>{author.name}</Text>
+                <Text style={styles.bio} numberOfLines={1}>{author.bio}</Text>
+              </View>
+              <View style={styles.photoSlot}>
+                {authorPhotos[author.id]
+                  ? <Image source={authorPhotos[author.id]} style={styles.photo} />
+                  : <View style={[styles.photo, styles.photoPlaceholder]}><Text style={styles.photoInitial}>{author.name.charAt(0)}</Text></View>}
+              </View>
+            </Pressable>
+          );
+        }}
       />
     </View>
   );
@@ -85,5 +124,9 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     photo: { width: 44, height: 44, borderRadius: 22 },
     photoPlaceholder: { backgroundColor: colors.taupe, alignItems: 'center', justifyContent: 'center' },
     photoInitial: { color: colors.white, fontSize: scale(16), fontWeight: '800' },
+    sectionHeader: { fontSize: scale(12), fontWeight: '800', color: colors.mutedChocolate, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 6, marginBottom: 8 },
+    quoteRow: { backgroundColor: colors.white, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginBottom: 8 },
+    quoteText: { fontSize: scale(14), lineHeight: scale(20), color: colors.chocolate, fontStyle: 'italic' },
+    quoteAuthor: { marginTop: 6, fontSize: scale(12), fontWeight: '700', color: colors.burntCaramel },
   });
 }

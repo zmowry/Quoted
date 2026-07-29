@@ -118,10 +118,10 @@ describe('Display settings', () => {
 });
 
 describe('Quote order and sound', () => {
-  it('defaults to in-order delivery with sound on', async () => {
+  it('defaults to shuffled delivery with sound on', async () => {
     await openSettings();
     expandCard('Daily delivery');
-    expect(screen.getByText(/in the order you saved them/)).toBeTruthy();
+    expect(screen.getByText(/every saved quote once before any repeats/)).toBeTruthy();
   });
 
   it('persists the shuffle preference and explains it', async () => {

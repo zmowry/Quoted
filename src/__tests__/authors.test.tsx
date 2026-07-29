@@ -55,6 +55,40 @@ describe('Authors list', () => {
     fireEvent.press(row);
     await waitFor(() => expect(router.push).toHaveBeenCalledWith('/authors/einstein'));
   });
+
+  it('finds a quote by its text even when the author name does not match', async () => {
+    // Nothing in the author list matches "riding a bicycle", so without quote-text
+    // search this phrase would surface no results at all.
+    renderWithProviders(<AuthorsScreen />);
+    fireEvent.changeText(screen.getByLabelText('Search authors'), 'riding a bicycle');
+    await screen.findByText('Matching quotes');
+    expect(screen.getByText(/riding a bicycle/)).toBeTruthy();
+    expect(screen.getByText('-- Albert Einstein')).toBeTruthy();
+    // The author itself did not match by name, so no separate author row for them.
+    expect(screen.queryByText('Albert Einstein')).toBeNull();
+  });
+
+  it('navigates to the matched quote\'s author when its row is tapped', async () => {
+    renderWithProviders(<AuthorsScreen />);
+    fireEvent.changeText(screen.getByLabelText('Search authors'), 'riding a bicycle');
+    fireEvent.press(await screen.findByText(/riding a bicycle/));
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith('/authors/einstein'));
+  });
+
+  it('does not duplicate a quote as a match when its author already matched by name', async () => {
+    // Einstein's own quotes should not also show up in the "Matching quotes"
+    // section underneath his own author row.
+    renderWithProviders(<AuthorsScreen />);
+    fireEvent.changeText(screen.getByLabelText('Search authors'), 'einstein');
+    await screen.findByText('Albert Einstein');
+    expect(screen.queryByText('Matching quotes')).toBeNull();
+  });
+
+  it('shows no quote matches section for a search with no results', async () => {
+    renderWithProviders(<AuthorsScreen />);
+    fireEvent.changeText(screen.getByLabelText('Search authors'), 'zzzzz');
+    await waitFor(() => expect(screen.queryByText('Matching quotes')).toBeNull());
+  });
 });
 
 describe('Author detail', () => {

@@ -211,7 +211,7 @@ export default function SettingsScreen(): ReactElement {
             </Pressable>
             {mainSaved ? <Text style={styles.savedMsg}>(Setting saved)</Text> : null}
 
-            <Text style={[styles.label, { marginTop: 18 }]}>Which quote comes next</Text>
+            <Text style={[styles.label, { marginTop: 18 }]}>Which quote comes next?</Text>
             <View style={styles.modeRow}>
               {orderOptions.map(({ value, label }) => (
                 <Pressable key={value} accessibilityRole="button" onPress={() => void updateQuoteOrder(value)} style={[styles.modeBtn, quoteOrder === value && styles.modeBtnActive]}>
@@ -226,7 +226,7 @@ export default function SettingsScreen(): ReactElement {
             </Text>
 
             <View style={styles.yesNoRow}>
-              <Text style={styles.label}>Play a sound?</Text>
+              <Text style={styles.label}>Play a sound on notification?</Text>
               <View style={styles.toggle}>
                 <Pressable accessibilityRole="button" accessibilityLabel="Play a sound: No" accessibilityState={{ selected: !soundEnabled }} onPress={() => void updateSoundEnabled(false)} style={[styles.toggleBtn, !soundEnabled && styles.toggleActive]}>
                   <Text style={[styles.toggleText, !soundEnabled && styles.toggleTextActive]}>No</Text>

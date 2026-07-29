@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
@@ -24,6 +24,7 @@ export default function QuoteBankScreen(): ReactElement {
   const router = useRouter();
   const [viewMode, setViewMode] = useState<'random' | 'author'>('random');
   const [activeCollection, setActiveCollection] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
   const [taggedQuote, setTaggedQuote] = useState<Quote | null>(null);
   const [sharing, setSharing] = useState(false);
   const { copied, copy } = useCopyFeedback();
@@ -31,10 +32,15 @@ export default function QuoteBankScreen(): ReactElement {
   const bannerRef = useRef<View>(null);
 
   const filteredQuotes = useMemo(() => {
-    if (!activeCollection) return quotes;
-    const col = collections.find((c) => c.id === activeCollection);
-    return col ? quotes.filter((q) => col.quoteIds.includes(q.id)) : quotes;
-  }, [quotes, collections, activeCollection]);
+    let result = quotes;
+    if (activeCollection) {
+      const col = collections.find((c) => c.id === activeCollection);
+      if (col) result = result.filter((q) => col.quoteIds.includes(q.id));
+    }
+    const query = search.trim().toLowerCase();
+    if (query) result = result.filter((q) => q.text.toLowerCase().includes(query) || q.authorName.toLowerCase().includes(query));
+    return result;
+  }, [quotes, collections, activeCollection, search]);
 
   // Grouped from the filtered set, not the whole bank: the collection chips stay
   // on screen in this view, so ignoring them here would leave a chip highlighted
@@ -120,17 +126,28 @@ export default function QuoteBankScreen(): ReactElement {
           </Pressable>
         </View>
       </View>
+      <TextInput
+        accessibilityLabel="Search your quotes"
+        value={search}
+        onChangeText={setSearch}
+        placeholder="Search your quotes"
+        placeholderTextColor={colors.taupe}
+        style={styles.search}
+      />
       {collectionChips}
     </View>
   );
 
   const header = <View>{banner}{headingRow}</View>;
 
-  // Reachable from either view, since both are filtered by the selected collection.
-  const emptyCollection = (
+  // Reachable from either view, since both are filtered by the same collection
+  // and search state.
+  const emptyResults = (
     <View style={styles.empty}>
-      <Text style={styles.emptyTitle}>No quotes in this collection</Text>
-      <Text style={styles.emptyText}>Tap the bookmark icon on any saved quote to add it here.</Text>
+      <Text style={styles.emptyTitle}>{search.trim() ? 'No quotes match your search' : 'No quotes in this collection'}</Text>
+      <Text style={styles.emptyText}>
+        {search.trim() ? 'Try a different word, or clear the search.' : 'Tap the bookmark icon on any saved quote to add it here.'}
+      </Text>
     </View>
   );
 
@@ -154,7 +171,7 @@ export default function QuoteBankScreen(): ReactElement {
         data={authorGroups}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={header}
-        ListEmptyComponent={emptyCollection}
+        ListEmptyComponent={emptyResults}
         renderItem={({ item }) => (
           <Pressable style={styles.authorCard} onPress={() => router.push(`/authors/${item.id}`)}>
             {authorPhotos[item.id] ? <Image source={authorPhotos[item.id]} style={styles.authorCardPhoto} /> : null}
@@ -173,7 +190,7 @@ export default function QuoteBankScreen(): ReactElement {
         data={filteredQuotes}
         keyExtractor={(item) => item.id}
         ListHeaderComponent={header}
-        ListEmptyComponent={emptyCollection}
+        ListEmptyComponent={emptyResults}
         renderItem={({ item }) => (
           <QuoteCard
             quote={item}
@@ -214,8 +231,9 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     shareText: { fontSize: scale(12), color: colors.mutedChocolate, fontWeight: '600' },
     bannerActions: { flexDirection: 'row', alignItems: 'center', gap: 16, alignSelf: 'flex-end', marginTop: 8, marginBottom: 6 },
     bannerActionBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 4 },
-    headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+    headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 8 },
     heading: { fontSize: scale(22), fontWeight: '800', color: colors.chocolate },
+    search: { backgroundColor: colors.white, borderColor: colors.border, borderWidth: 1, borderRadius: 10, paddingVertical: 6, paddingHorizontal: 10, marginBottom: 10, fontSize: scale(13), color: colors.chocolate },
     toggle: { flexDirection: 'row', backgroundColor: colors.border, borderRadius: 8, padding: 2, gap: 2 },
     toggleBtn: { padding: 6, borderRadius: 6 },
     toggleActive: { backgroundColor: colors.chocolate },

@@ -180,3 +180,65 @@ describe('Collections', () => {
     await screen.findByText('No quotes in this collection');
   });
 });
+
+describe('Searching the quote bank', () => {
+  it('filters the saved list down to quotes matching the search text', async () => {
+    await seedTwoQuotesAndOpenBank();
+    fireEvent.changeText(screen.getByLabelText('Search your quotes'), 'imagination');
+    await waitFor(() => expect(screen.getAllByLabelText(/^Delete /i)).toHaveLength(1));
+    expect(screen.getByLabelText(`Delete ${IMAGINATION}`)).toBeTruthy();
+    expect(screen.queryByLabelText(`Delete ${BICYCLE}`)).toBeNull();
+  });
+
+  it('also matches on author name, not just quote text', async () => {
+    const author = renderWithProviders(<AuthorDetail authorId="einstein" />);
+    await screen.findByText('Albert Einstein');
+    fireEvent.press(screen.getByLabelText(`Save ${BICYCLE}`));
+    await screen.findByLabelText(`Remove ${BICYCLE}`);
+    author.unmount();
+
+    const twain = renderWithProviders(<AuthorDetail authorId="twain" />);
+    await screen.findByText('Mark Twain');
+    fireEvent.press(screen.getByLabelText(`Save ${GETTING_STARTED}`));
+    await screen.findByLabelText(`Remove ${GETTING_STARTED}`);
+    twain.unmount();
+
+    renderWithProviders(<QuoteBankScreen />);
+    await screen.findByText('My saved quotes');
+    await waitFor(() => expect(screen.getAllByLabelText(/^Delete /i)).toHaveLength(2));
+
+    fireEvent.changeText(screen.getByLabelText('Search your quotes'), 'twain');
+    await waitFor(() => expect(screen.getAllByLabelText(/^Delete /i)).toHaveLength(1));
+    expect(screen.getByLabelText(`Delete ${GETTING_STARTED}`)).toBeTruthy();
+  });
+
+  it('shows a search-specific empty message rather than the collection one', async () => {
+    await seedTwoQuotesAndOpenBank();
+    fireEvent.changeText(screen.getByLabelText('Search your quotes'), 'zzzzz');
+    await screen.findByText('No quotes match your search');
+    expect(screen.queryByText('No quotes in this collection')).toBeNull();
+  });
+
+  it('combines with the active collection filter', async () => {
+    await seedTwoQuotesAndOpenBank();
+    await openSheetAndCreate('Motivation');
+    fireEvent.press(sheet().getByText('Motivation'));
+    fireEvent.press(sheet().getByText('Done'));
+
+    fireEvent.press(await chips().findByText('Motivation'));
+    await waitFor(() => expect(screen.getAllByLabelText(/^Delete /i)).toHaveLength(1));
+    expect(screen.getByLabelText(`Delete ${BICYCLE}`)).toBeTruthy();
+
+    // Searching for the other, uncollected quote while this collection is active
+    // must not resurrect it — both filters have to hold at once.
+    fireEvent.changeText(screen.getByLabelText('Search your quotes'), 'imagination');
+    await screen.findByText('No quotes match your search');
+  });
+
+  it('carries the search into the author-grouped view', async () => {
+    await seedTwoQuotesAndOpenBank();
+    fireEvent.changeText(screen.getByLabelText('Search your quotes'), 'zzzzz');
+    fireEvent.press(screen.getByLabelText('Group by author'));
+    await screen.findByText('No quotes match your search');
+  });
+});

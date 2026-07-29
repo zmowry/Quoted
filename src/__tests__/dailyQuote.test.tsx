@@ -12,6 +12,8 @@ import { AuthorDetail } from '../../app/(tabs)/authors/[authorId]';
 const BICYCLE = 'Life is like riding a bicycle. To keep your balance, you must keep moving.';
 const IMAGINATION = 'Imagination is more important than knowledge.';
 const BICYCLE_ATTRIBUTED = `"${BICYCLE}" -- Albert Einstein`;
+const CURLY_BICYCLE = `“${BICYCLE}”`;
+const CURLY_IMAGINATION = `“${IMAGINATION}”`;
 
 async function saveQuoteAndOpenBank(authorId: string, text: string): Promise<void> {
   const author = renderWithProviders(<AuthorDetail authorId={authorId} />);
@@ -85,13 +87,17 @@ describe('Quote of the day banner', () => {
     await screen.findByLabelText(`Remove ${IMAGINATION}`);
     author.unmount();
 
+    // Order is shuffled by default, so which of the two lands on day one is not
+    // fixed; capture whichever it is and hold every later launch to that pick.
+    let expected = '';
     // Reopening used to advance the cycle, so the bank burned through a quote on
     // every launch while the pending notification still held the first one.
     for (let launch = 0; launch < 3; launch++) {
       const bank = renderWithProviders(<QuoteBankScreen />);
       await screen.findByText('My saved quotes');
       await flushPending();
-      await waitFor(() => expect(screen.getByText(`“${BICYCLE}”`)).toBeTruthy());
+      if (launch === 0) expected = screen.queryByText(CURLY_BICYCLE) ? CURLY_BICYCLE : CURLY_IMAGINATION;
+      await waitFor(() => expect(screen.getByText(expected)).toBeTruthy());
       bank.unmount();
     }
   });
@@ -107,10 +113,15 @@ describe('Quote of the day banner', () => {
 
     renderWithProviders(<QuoteBankScreen />);
     await screen.findByText('My saved quotes');
-    await waitFor(() => expect(screen.getByText(`“${BICYCLE}”`)).toBeTruthy());
+    await flushPending();
+    // Order is shuffled by default, so pin down whichever quote landed first and
+    // expect the other one after refresh, rather than assuming which is which.
+    const initial = screen.queryByText(CURLY_BICYCLE) ? CURLY_BICYCLE : CURLY_IMAGINATION;
+    const other = initial === CURLY_BICYCLE ? CURLY_IMAGINATION : CURLY_BICYCLE;
+    await waitFor(() => expect(screen.getByText(initial)).toBeTruthy());
     // Holding a day's quote steady must not disable the explicit Refresh action.
     fireEvent.press(screen.getByText('Refresh'));
-    await waitFor(() => expect(screen.getByText(`“${IMAGINATION}”`)).toBeTruthy());
+    await waitFor(() => expect(screen.getByText(other)).toBeTruthy());
   });
 
   it('links from the banner to the author detail route', async () => {
