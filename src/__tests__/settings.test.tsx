@@ -140,7 +140,7 @@ describe('Quote order and sound', () => {
     expandCard('Daily delivery');
     jest.clearAllMocks();
 
-    fireEvent.press(screen.getByRole('button', { name: 'No' }));
+    fireEvent.press(screen.getByRole('button', { name: 'Play a sound: No' }));
     await waitFor(async () => expect(await AsyncStorage.getItem(STORAGE_KEYS.sound)).toBe('false'));
     // Sound is baked into the pending notification, so it must be rebuilt rather
     // than left for the next launch.
@@ -153,6 +153,32 @@ describe('Quote order and sound', () => {
       expect.objectContaining({ trigger: expect.objectContaining({ type: 'date' }) }),
     );
     expect(lastTriggerDate().getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('gives the sound toggle buttons distinct accessible names', async () => {
+    // Both this card and "More quotes per day" render their own Yes/No toggle,
+    // so a plain "Yes"/"No" accessible name would be ambiguous with both cards
+    // open and unusable for a screen reader either way.
+    await openSettings();
+    expandCard('Daily delivery');
+    expandCard('More quotes per day');
+
+    expect(screen.getByRole('button', { name: 'Play a sound: Yes' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Play a sound: No' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'More quotes per day: Yes' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'More quotes per day: No' })).toBeTruthy();
+  });
+
+  it('reflects the selected sound choice in accessibilityState', async () => {
+    await openSettings();
+    expandCard('Daily delivery');
+    expect(screen.getByRole('button', { name: 'Play a sound: Yes' }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: true }),
+    );
+    fireEvent.press(screen.getByRole('button', { name: 'Play a sound: No' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Play a sound: No' }).props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: true }),
+    ));
   });
 
   it('restores a stored order and sound choice on mount', async () => {

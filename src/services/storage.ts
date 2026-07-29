@@ -26,7 +26,17 @@ export const STORAGE_KEYS = {
 } as const;
 
 const KEYS = STORAGE_KEYS;
-const read = async <T,>(key: string, fallback: T): Promise<T> => { const raw = await AsyncStorage.getItem(key); return raw ? JSON.parse(raw) as T : fallback; };
+/**
+ * A value written by a future version of the app, or corrupted on disk, must
+ * not take down every other key's load: each key falls back to its own default
+ * independently rather than one bad value throwing out of the whole app-mount
+ * effect and leaving the bank looking empty with no explanation.
+ */
+const read = async <T,>(key: string, fallback: T): Promise<T> => {
+  const raw = await AsyncStorage.getItem(key);
+  if (!raw) return fallback;
+  try { return JSON.parse(raw) as T; } catch { return fallback; }
+};
 
 export const quoteStorage = {
   async getQuotes(): Promise<Quote[]> { return read(KEYS.quotes, []); },

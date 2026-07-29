@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import { ActivityIndicator, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
@@ -53,7 +53,9 @@ export default function QuoteBankScreen(): ReactElement {
       setSharing(true);
       const uri = await captureRef(bannerRef, { format: 'png', quality: 1 });
       await shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share your quote' });
-    } catch { } finally { setSharing(false); }
+    } catch {
+      Alert.alert('Could not share', 'Something went wrong preparing the quote image. Please try again.');
+    } finally { setSharing(false); }
   };
 
   if (loading) return <View style={styles.center}><ActivityIndicator /></View>;
@@ -184,8 +186,11 @@ export default function QuoteBankScreen(): ReactElement {
         quote={taggedQuote}
         collections={collections}
         onClose={() => setTaggedQuote(null)}
-        onAdd={(colId) => void addQuoteToCollection(taggedQuote!.id, colId)}
-        onRemove={(colId) => void removeQuoteFromCollection(taggedQuote!.id, colId)}
+        // CollectionModal only fires these while a quote is tagged, but that is
+        // its contract to keep, not this component's to assume; a null check
+        // here is a no-op rather than a crash if that ever changes.
+        onAdd={(colId) => { if (taggedQuote) void addQuoteToCollection(taggedQuote.id, colId); }}
+        onRemove={(colId) => { if (taggedQuote) void removeQuoteFromCollection(taggedQuote.id, colId); }}
         onNew={(name) => void addCollection(name)}
         onDelete={(colId) => { void deleteCollection(colId); if (activeCollection === colId) setActiveCollection(null); }}
       />

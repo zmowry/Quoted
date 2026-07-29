@@ -1,3 +1,4 @@
+import { Alert } from 'react-native';
 import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -23,7 +24,8 @@ async function saveQuoteAndOpenBank(authorId: string, text: string): Promise<voi
   await flushPending();
 }
 
-beforeEach(async () => { await AsyncStorage.clear(); jest.clearAllMocks(); });
+beforeEach(async () => { await AsyncStorage.clear(); jest.clearAllMocks(); jest.spyOn(Alert, 'alert').mockImplementation(jest.fn()); });
+afterEach(() => jest.restoreAllMocks());
 
 describe('Quote of the day banner', () => {
   it('prompts the user when the bank is empty', async () => {
@@ -61,14 +63,17 @@ describe('Quote of the day banner', () => {
     ));
   });
 
-  it('stays usable when sharing fails', async () => {
+  it('stays usable and tells the user when sharing fails', async () => {
     (captureRef as jest.Mock).mockRejectedValueOnce(new Error('capture unavailable'));
     await saveQuoteAndOpenBank('einstein', BICYCLE);
     fireEvent.press(screen.getByText('Share quote'));
     await flushPending();
-    // The failure is swallowed and the control resets rather than sticking on "Preparing...".
+    // The control resets rather than sticking on "Preparing...", and the failure
+    // is surfaced rather than swallowed — a silent no-op leaves the user unsure
+    // whether they mis-tapped or the app is broken.
     await waitFor(() => expect(screen.getByText('Share quote')).toBeTruthy());
     expect(shareAsync).not.toHaveBeenCalled();
+    expect(Alert.alert).toHaveBeenCalledWith('Could not share', expect.any(String));
   });
 
   it('shows the same quote when the app is reopened later the same day', async () => {

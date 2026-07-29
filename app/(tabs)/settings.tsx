@@ -228,10 +228,10 @@ export default function SettingsScreen(): ReactElement {
             <View style={styles.yesNoRow}>
               <Text style={styles.label}>Play a sound?</Text>
               <View style={styles.toggle}>
-                <Pressable accessibilityRole="button" onPress={() => void updateSoundEnabled(false)} style={[styles.toggleBtn, !soundEnabled && styles.toggleActive]}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Play a sound: No" accessibilityState={{ selected: !soundEnabled }} onPress={() => void updateSoundEnabled(false)} style={[styles.toggleBtn, !soundEnabled && styles.toggleActive]}>
                   <Text style={[styles.toggleText, !soundEnabled && styles.toggleTextActive]}>No</Text>
                 </Pressable>
-                <Pressable accessibilityRole="button" onPress={() => void updateSoundEnabled(true)} style={[styles.toggleBtn, soundEnabled && styles.toggleActive]}>
+                <Pressable accessibilityRole="button" accessibilityLabel="Play a sound: Yes" accessibilityState={{ selected: soundEnabled }} onPress={() => void updateSoundEnabled(true)} style={[styles.toggleBtn, soundEnabled && styles.toggleActive]}>
                   <Text style={[styles.toggleText, soundEnabled && styles.toggleTextActive]}>Yes</Text>
                 </Pressable>
               </View>
@@ -251,10 +251,10 @@ export default function SettingsScreen(): ReactElement {
             <View style={styles.yesNoRow}>
               <Text style={styles.label}>Do you want more quotes per day?</Text>
               <View style={styles.toggle}>
-                <Pressable onPress={() => { setExtraEnabled(false); markDirty(); }} style={[styles.toggleBtn, !extraEnabled && styles.toggleActive]}>
+                <Pressable accessibilityRole="button" accessibilityLabel="More quotes per day: No" accessibilityState={{ selected: !extraEnabled }} onPress={() => { setExtraEnabled(false); markDirty(); }} style={[styles.toggleBtn, !extraEnabled && styles.toggleActive]}>
                   <Text style={[styles.toggleText, !extraEnabled && styles.toggleTextActive]}>No</Text>
                 </Pressable>
-                <Pressable onPress={() => { setExtraEnabled(true); markDirty(); }} style={[styles.toggleBtn, extraEnabled && styles.toggleActive]}>
+                <Pressable accessibilityRole="button" accessibilityLabel="More quotes per day: Yes" accessibilityState={{ selected: extraEnabled }} onPress={() => { setExtraEnabled(true); markDirty(); }} style={[styles.toggleBtn, extraEnabled && styles.toggleActive]}>
                   <Text style={[styles.toggleText, extraEnabled && styles.toggleTextActive]}>Yes</Text>
                 </Pressable>
               </View>
