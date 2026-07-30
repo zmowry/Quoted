@@ -37,3 +37,14 @@ export const darkColors = {
 export type Colors = { readonly [K in keyof typeof lightColors]: string };
 
 export const colors = lightColors;
+
+/**
+ * Quote text is set in a serif to separate the words from the app's own voice.
+ *
+ * iOS ships Georgia, so this needs no bundled asset, no expo-font, and no
+ * loading gate: the family resolves at first paint. Deliberately not routed
+ * through `useTheme` — it varies by neither palette nor text size, and putting
+ * it in the context would thread a third argument through `makeStyles(colors,
+ * scale)` in five files and imply to the next reader that it is configurable.
+ */
+export const QUOTE_FONT = 'Georgia';

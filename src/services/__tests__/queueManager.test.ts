@@ -1,5 +1,5 @@
 jest.mock('@/src/services/storage', () => ({ quoteStorage: { getQueue: jest.fn(), setQueue: jest.fn(), getDailyAssignments: jest.fn(), setDailyAssignments: jest.fn() } }));
-import { dateKey, nextQuoteInCycle, planRotation, quoteForDate, reassignDate, resetPlanFrom } from '@/src/services/queueManager';
+import { dateKey, deliveredHistory, nextQuoteInCycle, planRotation, quoteForDate, reassignDate, resetPlanFrom } from '@/src/services/queueManager';
 import { quoteStorage } from '@/src/services/storage';
 import type { Quote } from '@/src/types';
 const quotes: Quote[] = [{ id: 'a', text: 'A', authorId: 'x', authorName: 'X' }, { id: 'b', text: 'B', authorId: 'x', authorName: 'X' }];
@@ -202,6 +202,55 @@ describe('quoteForDate', () => {
       await resetPlanFrom('2026-07-29', five);
       expect(Object.keys(assignments).sort()).toEqual(['2026-07-29', '2026-07-29#1', '2026-07-29#2']);
       expect(shownIds.sort()).toEqual(['a', 'b', 'c']);
+    });
+  });
+
+  describe('deliveredHistory', () => {
+    const five: Quote[] = ['a', 'b', 'c', 'd', 'e'].map((id) => ({ id, text: id.toUpperCase(), authorId: 'x', authorName: 'X' }));
+    const NOW = new Date(2026, 6, 29);
+    const TODAY = dateKey(NOW);
+
+    it('leaves out days that have not happened yet', async () => {
+      // planRotation writes a fortnight ahead, so without the filter almost
+      // everything it returns would be quotes the user has never received.
+      await planRotation(five, 'sequential', { days: 14, from: NOW });
+      expect(Object.keys(assignments)).toHaveLength(14);
+
+      const { entries } = await deliveredHistory(five, { now: NOW });
+      expect(entries).toHaveLength(1);
+      expect(entries[0].day).toBe(TODAY);
+    });
+
+    it('includes today even before its delivery time', async () => {
+      // Today's quote is already assigned and on the banner, and rows are labelled
+      // by day rather than by time, so nothing false is claimed.
+      await planRotation(five, 'sequential', { days: 1, from: NOW });
+      const { entries } = await deliveredHistory(five, { now: NOW });
+      expect(entries.map((entry) => entry.quote.id)).toEqual(['a']);
+    });
+
+    it('orders newest day first, with a day\'s daily quote ahead of its extras', async () => {
+      assignments = { '2026-07-27': 'a', '2026-07-28': 'b', '2026-07-28#1': 'c', '2026-07-28#2': 'd' };
+      const { entries } = await deliveredHistory(five, { now: NOW });
+      expect(entries.map((entry) => entry.slot)).toEqual(['2026-07-28', '2026-07-28#1', '2026-07-28#2', '2026-07-27']);
+      expect(entries.map((entry) => entry.extra)).toEqual([0, 1, 2, 0]);
+    });
+
+    it('skips a quote deleted since delivery and counts it', async () => {
+      assignments = { '2026-07-28': 'a', '2026-07-27': 'gone-from-the-bank' };
+      const { entries, missing } = await deliveredHistory(five, { now: NOW });
+      expect(entries.map((entry) => entry.quote.id)).toEqual(['a']);
+      expect(missing).toBe(1);
+    });
+
+    it('returns nothing for a bank that has never delivered', async () => {
+      await expect(deliveredHistory(five, { now: NOW })).resolves.toEqual({ entries: [], missing: 0 });
+    });
+
+    it('treats a malformed slot suffix as the daily slot rather than NaN', async () => {
+      assignments = { '2026-07-28#abc': 'a' };
+      const { entries } = await deliveredHistory(five, { now: NOW });
+      expect(entries[0].extra).toBe(0);
     });
   });
 });

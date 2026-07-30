@@ -225,6 +225,33 @@ describe('Clearing all data', () => {
     fireEvent.press(screen.getByRole('button', { name: /Clear all data/ }));
 
     expect(Alert.alert).toHaveBeenCalledWith('Clear all data?', expect.stringContaining('cannot be undone'), expect.any(Array));
+  });
+
+  it('names how many quotes the user wrote themselves', async () => {
+    // Custom quotes are the only data here that cannot be recovered from the
+    // built-in catalogue, and there is no backup, so the count is spelled out
+    // rather than buried in the total.
+    await AsyncStorage.setItem(STORAGE_KEYS.quotes, JSON.stringify([
+      { id: 'q1', text: 'A saved quote', authorId: 'woolf', authorName: 'Virginia Woolf' },
+      { id: 'custom-a', text: 'Mine', authorId: 'custom:me', authorName: 'Me' },
+    ]));
+    await openSettings();
+    expandCard('Your data');
+    fireEvent.press(screen.getByRole('button', { name: /Clear all data/ }));
+
+    expect(Alert.alert).toHaveBeenCalledWith('Clear all data?', expect.stringContaining('including 1 you wrote yourself'), expect.any(Array));
+  });
+
+  // A guard rather than a fail-before test: the clause was absent before too. It
+  // earns its place by failing an implementation that appends it unconditionally,
+  // which would read "including 0 you wrote yourself".
+  it('says nothing about custom quotes when there are none', async () => {
+    await seedData();
+    await openSettings();
+    expandCard('Your data');
+    fireEvent.press(screen.getByRole('button', { name: /Clear all data/ }));
+
+    expect(Alert.alert).toHaveBeenCalledWith('Clear all data?', expect.not.stringContaining('wrote yourself'), expect.any(Array));
     // An escape hatch must exist, and the delete must be marked destructive so the
     // platform renders it in red rather than as a neutral default action.
     expect(alertButtons().find((b) => b.text === 'Cancel')?.style).toBe('cancel');

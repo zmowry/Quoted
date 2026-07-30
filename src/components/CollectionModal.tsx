@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { FlatList, Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/src/hooks/useTheme';
+import { QUOTE_FONT } from '@/src/theme';
 import type { Colors } from '@/src/theme';
 import type { Collection, Quote } from '@/src/types';
 
@@ -89,7 +90,7 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     sheet: { backgroundColor: colors.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20, paddingBottom: 36, maxHeight: '75%' },
     handle: { width: 36, height: 4, borderRadius: 2, backgroundColor: colors.border, alignSelf: 'center', marginBottom: 16 },
     title: { fontSize: scale(17), fontWeight: '800', color: colors.chocolate, marginBottom: 6 },
-    quotePrev: { fontSize: scale(12), color: colors.mutedChocolate, lineHeight: scale(17), marginBottom: 16, fontStyle: 'italic' },
+    quotePrev: { fontFamily: QUOTE_FONT, fontSize: scale(12), color: colors.mutedChocolate, lineHeight: scale(17), marginBottom: 16, fontStyle: 'italic' },
     empty: { fontSize: scale(13), color: colors.taupe, marginBottom: 16 },
     list: { maxHeight: 220, marginBottom: 16 },
     row: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.border },

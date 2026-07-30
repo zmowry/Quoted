@@ -14,6 +14,23 @@ describe('quoteStorage', () => {
   it('deduplicates saved quotes by stable quote id', async () => { await quoteStorage.saveQuote(quote); await quoteStorage.saveQuote({ ...quote, text: 'Changed' }); expect(await quoteStorage.getQuotes()).toEqual([quote]); });
   it('persists notification delivery time', async () => { await quoteStorage.setNotificationTime({ hour: 14, minute: 30 }); expect(await quoteStorage.getNotificationTime()).toEqual({ hour: 14, minute: 30 }); });
 
+  // saveQuote appends and dedupes by id (pinned above), so an edit routed through
+  // it is a silent no-op. updateQuote exists precisely because of that.
+  it('updates a quote in place, holding its position in the list', async () => {
+    const other: Quote = { id: 'q-2', text: 'Second', authorId: 'test', authorName: 'Tester' };
+    await quoteStorage.saveQuote(quote);
+    await quoteStorage.saveQuote(other);
+    await quoteStorage.updateQuote({ ...quote, text: 'Rewritten' });
+    // Position preserved, so an edited quote does not jump under the user.
+    expect(await quoteStorage.getQuotes()).toEqual([{ ...quote, text: 'Rewritten' }, other]);
+  });
+
+  it('leaves the bank untouched when updating an id that is not there', async () => {
+    await quoteStorage.saveQuote(quote);
+    await quoteStorage.updateQuote({ id: 'nope', text: 'Ghost', authorId: 'x', authorName: 'X' });
+    expect(await quoteStorage.getQuotes()).toEqual([quote]);
+  });
+
   describe('corrupted storage', () => {
     it('falls back to the default instead of throwing when a value is not valid JSON', async () => {
       // A bare JSON.parse would throw here, and the mount effect that awaits

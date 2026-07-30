@@ -82,7 +82,18 @@ export async function scheduleAllNotifications(
         if (occurrence.when <= now) continue;
         if (scheduled >= MAX_PENDING) return;
         await Notifications.scheduleNotificationAsync({
-          content: { title: occurrence.title, body: occurrence.quote ? quoteWithAttribution(occurrence.quote) : 'No quotes saved!', sound },
+          content: {
+            title: occurrence.title,
+            body: occurrence.quote ? quoteWithAttribution(occurrence.quote) : 'No quotes saved!',
+            sound,
+            // Spread conditionally so the empty-bank nudge carries no key at all
+            // rather than `quoteId: undefined`, letting the tap handler's fallback
+            // fire naturally. The payload is frozen into the OS at schedule time
+            // and read back by whatever build is installed a fortnight later, so
+            // `authorId` rides along unused today instead of making a future
+            // version wait for old payloads to drain.
+            ...(occurrence.quote ? { data: { quoteId: occurrence.quote.id, authorId: occurrence.quote.authorId } } : {}),
+          },
           trigger: { type: Notifications.SchedulableTriggerInputTypes.DATE, date: occurrence.when, channelId: 'daily-quotes' },
         });
         scheduled++;

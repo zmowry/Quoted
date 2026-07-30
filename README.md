@@ -7,7 +7,10 @@ An Expo Router + TypeScript iOS app for collecting quotes from famous authors, s
 - Browse 240 quotes from 20 authors (with bios and photos) and save the ones you like to "My Bank"
 - Quote of the Day banner that cycles through your saved quotes without repeating until all have been shown
 - Share the quote of the day as an image, or copy any quote to the clipboard
+- Write your own quotes with your own attribution; they join the same rotation, collections, and notifications as saved ones
 - Organize saved quotes into custom collections and filter the bank by them
+- Quote history showing what has already been delivered, up to 21 days back
+- Tapping a notification opens the app on the quote that was delivered
 - Configurable daily notification time, plus optional additional notifications (1-5/day) at custom times
 - Light/dark mode and adjustable text size, both persisted
 
@@ -89,3 +92,9 @@ npx eas build --profile preview --platform ios
   rescheduled whenever the delivery time, quote of the day, or saved quotes change.
 - All data (saved quotes, collections, and settings) lives in `AsyncStorage` on the
   device — there is no server or account system.
+- **There is no backup or export.** Quotes you write yourself are the only data that
+  cannot be recovered from the built-in catalogue, and `Clear all data` destroys them,
+  as does uninstalling the app. A deleted quote can be restored only within the
+  six-second undo window.
+- Quote history is derived from the day-assignment records the scheduler already keeps,
+  so it shows only quotes still in your bank, and emptying the bank clears it.

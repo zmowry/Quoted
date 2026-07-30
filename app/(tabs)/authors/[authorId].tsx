@@ -9,6 +9,7 @@ import { quoteWithAttribution } from '@/src/format';
 import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
+import { QUOTE_FONT } from '@/src/theme';
 import type { Colors } from '@/src/theme';
 import type { Quote } from '@/src/types';
 
@@ -100,7 +101,7 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     emptyText: { fontSize: scale(14), color: colors.mutedChocolate, fontStyle: 'italic', textAlign: 'center', marginTop: 20 },
     quoteCard: { backgroundColor: colors.white, borderRadius: 12, borderColor: colors.border, borderWidth: 1, padding: 12, marginBottom: 10 },
     quoteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
-    quote: { fontSize: scale(14), lineHeight: scale(20), color: colors.chocolate },
+    quote: { fontFamily: QUOTE_FONT, fontSize: scale(14), lineHeight: scale(20), color: colors.chocolate },
     save: { alignSelf: 'flex-start', marginTop: 10, backgroundColor: colors.caramel, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 7 },
     remove: { backgroundColor: colors.burntCaramel },
     saveText: { color: colors.white, fontWeight: '800', fontSize: scale(11) },

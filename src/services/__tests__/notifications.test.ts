@@ -18,10 +18,11 @@ const planFrom = (days: number, quotes: (Quote | undefined)[], extras: Quote[] =
     return { day, quote: quotes[i % quotes.length], extras };
   });
 
-const requests = (): { content: { body: string; sound: boolean }; trigger: { type: string; date: Date } }[] =>
+const requests = (): { content: { body: string; sound: boolean; data?: { quoteId?: string; authorId?: string } }; trigger: { type: string; date: Date } }[] =>
   (Notifications.scheduleNotificationAsync as jest.Mock).mock.calls.map(([request]) => request);
 const bodies = (): string[] => requests().map((request) => request.content.body);
 const dates = (): Date[] => requests().map((request) => request.trigger.date);
+const quoteIds = (): (string | undefined)[] => requests().map((request) => request.content.data?.quoteId);
 
 describe('scheduleAllNotifications', () => {
   beforeEach(() => jest.clearAllMocks());
@@ -93,6 +94,29 @@ describe('scheduleAllNotifications', () => {
     const extra: AdditionalQuotesSettings = { enabled: true, count: 5, times: [{ hour: 12, minute: 0 }] };
     await scheduleAllNotifications(nine, planFrom(1, [quote], [second, third]), extra, { now: NOW });
     expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(2);
+  });
+
+  it('tags every notification with the quote it carries', async () => {
+    // Without the payload a tap cannot tell which quote was delivered, so the app
+    // can only ever open on today's.
+    await scheduleAllNotifications(nine, planFrom(3, [quote, second, third]), undefined, { now: NOW });
+    expect(quoteIds()).toEqual(['a', 'b', 'c']);
+    expect(requests()[2].content.data?.authorId).toBe('twain');
+  });
+
+  it('tags an extra with its own quote, not the day\'s daily one', async () => {
+    const extra: AdditionalQuotesSettings = { enabled: true, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 30 }] };
+    await scheduleAllNotifications(nine, planFrom(1, [quote], [second, third]), extra, { now: NOW });
+    expect(quoteIds()).toEqual(['a', 'b', 'c']);
+  });
+
+  it('leaves the empty-bank nudge with no quote id at all', async () => {
+    // A guard rather than a fail-before test: with no payload at all this passes
+    // too. It earns its place by failing the plausible wrong version — an
+    // unconditional `data` object, which ships `quoteId: undefined` as a key the
+    // tap handler would then have to tell apart from a real one.
+    await scheduleAllNotifications(nine, planFrom(1, [undefined]), undefined, { now: NOW });
+    expect(requests()[0].content.data).toBeUndefined();
   });
 
   it('stops at the pending-notification budget rather than overflowing the OS limit', async () => {

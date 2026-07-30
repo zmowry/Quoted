@@ -7,9 +7,18 @@ import { useNotificationRoute } from '@/src/hooks/useNotificationRoute';
 
 const DEFAULT_ACTION = 'expo.modules.notifications.actions.DEFAULT';
 
-/** The shape the hook reads out of a notification response. */
-const responseFor = (identifier: string, actionIdentifier = DEFAULT_ACTION) =>
-  ({ actionIdentifier, notification: { request: { identifier } } } as unknown as ReturnType<typeof Notifications.useLastNotificationResponse>);
+/**
+ * The shape the hook reads out of a notification response.
+ *
+ * `data` is omitted entirely by default, which is exactly what a notification
+ * scheduled by an earlier build looks like — those cases double as the proof
+ * that reading the payload cannot throw on one.
+ */
+const responseFor = (identifier: string, actionIdentifier = DEFAULT_ACTION, data?: unknown) =>
+  ({
+    actionIdentifier,
+    notification: { request: { identifier, ...(data === undefined ? {} : { content: { data } }) } },
+  } as unknown as ReturnType<typeof Notifications.useLastNotificationResponse>);
 
 const setResponse = (response: ReturnType<typeof Notifications.useLastNotificationResponse>): void => {
   jest.mocked(Notifications.useLastNotificationResponse).mockReturnValue(response);
@@ -58,5 +67,21 @@ describe('Notification tap routing', () => {
     setResponse(responseFor('quote-1', 'expo.modules.notifications.actions.DISMISS'));
     render(<Probe />);
     expect(router.navigate).not.toHaveBeenCalled();
+  });
+
+  it('focuses the quote the notification carried', () => {
+    setResponse(responseFor('quote-1', DEFAULT_ACTION, { quoteId: 'einstein-2', authorId: 'einstein' }));
+    render(<Probe />);
+    expect(router.navigate).toHaveBeenCalledWith('/?quote=einstein-2');
+  });
+
+  it('falls back to the home screen when the payload is not a quote id', () => {
+    // A guard rather than a fail-before test: routing always went to '/' before.
+    // It earns its place by failing a bare `data.quoteId as string` cast, which
+    // would paste a number straight into the URL — the payload crosses the OS
+    // boundary untyped, so its shape is a claim rather than a guarantee.
+    setResponse(responseFor('quote-1', DEFAULT_ACTION, { quoteId: 42 }));
+    render(<Probe />);
+    expect(router.navigate).toHaveBeenCalledWith('/');
   });
 });

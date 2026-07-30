@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { isCustomQuote } from '@/src/customQuotes';
 import { useNotificationPermission } from '@/src/hooks/useNotificationPermission';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
@@ -114,9 +115,14 @@ export default function SettingsScreen(): ReactElement {
   // Destructive and irreversible, so it asks twice and never defaults to the
   // affirmative button.
   const confirmClearAll = (): void => {
+    // Quotes the user wrote are the only data here that cannot be recovered from
+    // the built-in catalogue, and there is no backup, so the count is named
+    // explicitly rather than hidden inside the total.
+    const own = quotes.filter(isCustomQuote).length;
+    const ownClause = own ? `, including ${own} you wrote yourself` : '';
     Alert.alert(
       'Clear all data?',
-      `This deletes ${quotes.length} saved ${quotes.length === 1 ? 'quote' : 'quotes'} and ${collections.length} ${collections.length === 1 ? 'collection' : 'collections'} from this device. It cannot be undone.`,
+      `This deletes ${quotes.length} saved ${quotes.length === 1 ? 'quote' : 'quotes'}${ownClause} and ${collections.length} ${collections.length === 1 ? 'collection' : 'collections'} from this device. It cannot be undone.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete everything', style: 'destructive', onPress: () => void clearAllData() },

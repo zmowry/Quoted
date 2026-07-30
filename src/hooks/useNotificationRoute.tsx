@@ -3,7 +3,8 @@ import * as Notifications from 'expo-notifications';
 import { router } from 'expo-router';
 
 /**
- * Sends a tapped notification to the Quote Bank home screen.
+ * Sends a tapped notification to the Quote Bank home screen, focused on the
+ * quote that actually fired.
  *
  * `useLastNotificationResponse` is used rather than a plain listener
  * subscription because it also replays the tap that cold-started the app: when
@@ -24,6 +25,11 @@ export function useNotificationRoute(): void {
     const id = response.notification.request.identifier;
     if (routed.current === id) return;
     routed.current = id;
-    router.navigate('/');
+    // Optional chaining rather than a cast: a notification scheduled by an
+    // earlier build carries no `data` at all, and the value crosses the OS
+    // boundary untyped, so its shape is a claim rather than a guarantee.
+    const data = response.notification.request.content?.data as { quoteId?: unknown } | undefined;
+    const quoteId = typeof data?.quoteId === 'string' ? data.quoteId : undefined;
+    router.navigate(quoteId ? `/?quote=${encodeURIComponent(quoteId)}` : '/');
   }, [response]);
 }

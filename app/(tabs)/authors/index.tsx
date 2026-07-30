@@ -8,6 +8,7 @@ import { authorsData } from '@/src/data/authorsData';
 import { authorPhotos } from '@/src/data/authorPhotos';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
+import { QUOTE_FONT } from '@/src/theme';
 import type { Colors } from '@/src/theme';
 import type { Author, Quote } from '@/src/types';
 
@@ -174,7 +175,9 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     photoInitial: { color: colors.white, fontSize: scale(16), fontWeight: '800' },
     sectionHeader: { fontSize: scale(12), fontWeight: '800', color: colors.mutedChocolate, textTransform: 'uppercase', letterSpacing: 0.6, marginTop: 6, marginBottom: 8 },
     quoteRow: { backgroundColor: colors.white, padding: 12, borderRadius: 12, borderWidth: 1, borderColor: colors.border, marginBottom: 8 },
-    quoteText: { fontSize: scale(14), lineHeight: scale(20), color: colors.chocolate, fontStyle: 'italic' },
+    // fontFamily + fontStyle resolves the real Georgia-Italic face through iOS
+    // trait matching rather than synthesising a slant.
+    quoteText: { fontFamily: QUOTE_FONT, fontSize: scale(14), lineHeight: scale(20), color: colors.chocolate, fontStyle: 'italic' },
     quoteAuthor: { marginTop: 6, fontSize: scale(12), fontWeight: '700', color: colors.burntCaramel },
   });
 }

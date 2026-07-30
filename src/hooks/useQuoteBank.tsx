@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import type { PropsWithChildren, ReactElement } from 'react';
 import { AppState } from 'react-native';
 import type { AdditionalQuotesSettings, Collection, NotificationTime, Quote, QuoteBankContextValue, QuoteOrder } from '@/src/types';
+import { isCustomQuote } from '@/src/customQuotes';
 import { DEFAULT_EXTRA_QUOTES, DEFAULT_NOTIFICATION_TIME, DEFAULT_QUOTE_ORDER, DEFAULT_SOUND_ENABLED, quoteStorage } from '@/src/services/storage';
 import { dateKey, planRotation, reassignDate, reconcileQueue, resetPlanFrom } from '@/src/services/queueManager';
 import { cancelAllNotifications, scheduleAllNotifications } from '@/src/services/notifications';
@@ -133,6 +134,19 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
     await syncSchedule(next, notificationTime, additionalQuotes, quoteOrder, soundEnabled);
   }, [notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
+  const updateCustomQuote = useCallback(async (quote: Quote) => {
+    // Only the user's own words are editable; a built-in quote's text is canonical
+    // and editing it would silently disagree with authorsData.
+    if (!isCustomQuote(quote)) return;
+    const next = await quoteStorage.updateQuote(quote);
+    setQuotes(next);
+    // No reconcileQueue: the id set is unchanged. But every planned day still
+    // holds the OLD text inside the OS, so the run is discarded and rewritten or
+    // the edit would not reach a notification for a fortnight.
+    await resetPlanFrom(dateKey(), next);
+    await syncSchedule(next, notificationTime, additionalQuotes, quoteOrder, soundEnabled);
+  }, [notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+
   const removeQuote = useCallback(async (id: string) => {
     const doomed = quotes.find((q) => q.id === id);
     const filedUnder = collections.filter((c) => c.quoteIds.includes(id)).map((c) => c.id);
@@ -234,7 +248,7 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
   }, [collections]);
 
   return (
-    <QuoteBankContext.Provider value={{ quotes, quoteOfDay, notificationTime, additionalQuotes, collections, loading, saveQuote, removeQuote, lastRemoved, undoRemove, refreshQuoteOfDay, updateNotificationTime, updateAdditionalQuotes, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled }}>
+    <QuoteBankContext.Provider value={{ quotes, quoteOfDay, notificationTime, additionalQuotes, collections, loading, saveQuote, updateCustomQuote, removeQuote, lastRemoved, undoRemove, refreshQuoteOfDay, updateNotificationTime, updateAdditionalQuotes, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled }}>
       {children}
     </QuoteBankContext.Provider>
   );

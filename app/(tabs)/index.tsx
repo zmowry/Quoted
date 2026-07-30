@@ -1,16 +1,19 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { captureRef } from 'react-native-view-shot';
 import { shareAsync } from 'expo-sharing';
 import { QuoteCard } from '@/src/components/QuoteCard';
 import { CollectionModal } from '@/src/components/CollectionModal';
+import { ComposeQuoteModal } from '@/src/components/ComposeQuoteModal';
+import { customQuoteWith, isCustomQuote, makeCustomQuote } from '@/src/customQuotes';
 import { quoteWithAttribution } from '@/src/format';
 import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
+import { QUOTE_FONT } from '@/src/theme';
 import type { Colors } from '@/src/theme';
 import type { Quote } from '@/src/types';
 import { authorPhotos } from '@/src/data/authorPhotos';
@@ -18,7 +21,7 @@ import { authorPhotos } from '@/src/data/authorPhotos';
 type AuthorGroup = { id: string; authorName: string };
 
 export default function QuoteBankScreen(): ReactElement {
-  const { quotes, quoteOfDay, loading, removeQuote, lastRemoved, undoRemove, refreshQuoteOfDay, collections, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection } = useQuoteBank();
+  const { quotes, quoteOfDay, loading, saveQuote, updateCustomQuote, removeQuote, lastRemoved, undoRemove, refreshQuoteOfDay, collections, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection } = useQuoteBank();
   const { colors, scale } = useTheme();
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const router = useRouter();
@@ -26,10 +29,43 @@ export default function QuoteBankScreen(): ReactElement {
   const [activeCollection, setActiveCollection] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [taggedQuote, setTaggedQuote] = useState<Quote | null>(null);
+  const [composing, setComposing] = useState(false);
+  const [editing, setEditing] = useState<Quote | null>(null);
   const [sharing, setSharing] = useState(false);
   const { copied, copy } = useCopyFeedback();
   const [refreshing, setRefreshing] = useState(false);
   const bannerRef = useRef<View>(null);
+
+  // A tapped notification arrives as ?quote=<id> so the banner can show the quote
+  // that actually fired rather than today's default.
+  const params = useLocalSearchParams<{ quote?: string }>();
+  const requestedId = Array.isArray(params.quote) ? params.quote[0] : params.quote;
+  const [focusId, setFocusId] = useState<string | undefined>(requestedId);
+  const latched = useRef<string | undefined>(requestedId);
+  useEffect(() => {
+    // Only a *new* tap re-focuses. Without the latch, any re-render would undo a
+    // dismissal, since the param stays in the URL after it has been handled.
+    if (requestedId === latched.current) return;
+    latched.current = requestedId;
+    setFocusId(requestedId);
+  }, [requestedId]);
+
+  // Returning on a later day must drop the focus, or a stale notification quote
+  // outlives the day it was delivered.
+  const seenDaily = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const id = quoteOfDay?.id;
+    // Skipping the first defined value is what makes a cold-start tap survive:
+    // quoteOfDay goes undefined -> today's quote *after* mount, and treating that
+    // initial load as a day change would wipe the focus just latched.
+    if (seenDaily.current !== undefined && id !== seenDaily.current) setFocusId(undefined);
+    seenDaily.current = id;
+  }, [quoteOfDay?.id]);
+
+  // A quote deleted since it was delivered simply fails to resolve, so the banner
+  // falls back to today's rather than rendering blank.
+  const focused = focusId ? quotes.find((q) => q.id === focusId) : undefined;
+  const displayed = focused ?? quoteOfDay;
 
   const filteredQuotes = useMemo(() => {
     let result = quotes;
@@ -69,32 +105,45 @@ export default function QuoteBankScreen(): ReactElement {
   const banner = (
     <View>
       <View ref={bannerRef} style={styles.banner} collapsable={false}>
-        <Text style={styles.kicker}>QUOTE OF THE DAY</Text>
-        <Text style={styles.bannerQuote}>{quoteOfDay ? `\u201C${quoteOfDay.text}\u201D` : 'No quotes saved!'}</Text>
-        {quoteOfDay
-          ? <Text style={styles.bannerAuthor}>{quoteOfDay.authorName}</Text>
+        {/* The kicker doubles as the explanation for why this is not today's quote. */}
+        <Text style={styles.kicker}>{focused ? 'FROM YOUR NOTIFICATION' : 'QUOTE OF THE DAY'}</Text>
+        <Text style={styles.bannerQuote}>{displayed ? `\u201C${displayed.text}\u201D` : 'No quotes saved!'}</Text>
+        {displayed
+          ? <Text style={styles.bannerAuthor}>{displayed.authorName}</Text>
           : <Text style={styles.bannerAuthor}>Save one from Explore to start your daily cycle.</Text>}
-        {quoteOfDay ? (
-          <Pressable accessibilityRole="button" onPress={() => router.push(`/authors/${quoteOfDay.authorId}`)} style={styles.moreRow}>
+        {/* A quote the user wrote has no author page to go to. */}
+        {displayed && !isCustomQuote(displayed) ? (
+          <Pressable accessibilityRole="button" onPress={() => router.push(`/authors/${displayed.authorId}`)} style={styles.moreRow}>
             <Text style={styles.moreText}>More from this author</Text>
-            {authorPhotos[quoteOfDay.authorId] ? <Image source={authorPhotos[quoteOfDay.authorId]} style={styles.authorPhoto} /> : null}
+            {authorPhotos[displayed.authorId] ? <Image source={authorPhotos[displayed.authorId]} style={styles.authorPhoto} /> : null}
           </Pressable>
         ) : null}
       </View>
-      {quoteOfDay ? (
+      {displayed ? (
         <View style={styles.bannerActions}>
           <Pressable accessibilityRole="button" onPress={() => void shareQuote()} style={styles.bannerActionBtn} disabled={sharing}>
             <Ionicons name="share-outline" size={13} color={colors.mutedChocolate} />
             <Text style={styles.shareText}>{sharing ? 'Preparing...' : 'Share quote'}</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" onPress={() => void copy(quoteWithAttribution(quoteOfDay))} style={styles.bannerActionBtn}>
+          <Pressable accessibilityRole="button" onPress={() => void copy(quoteWithAttribution(displayed))} style={styles.bannerActionBtn}>
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={13} color={copied ? colors.caramel : colors.mutedChocolate} />
             <Text style={[styles.shareText, copied && { color: colors.caramel }]}>{copied ? 'Copied!' : 'Copy quote'}</Text>
           </Pressable>
-          <Pressable accessibilityRole="button" onPress={async () => { if (refreshing) return; setRefreshing(true); try { await refreshQuoteOfDay(); } finally { setRefreshing(false); } }} style={styles.bannerActionBtn} disabled={refreshing}>
-            <Ionicons name="refresh" size={13} color={colors.mutedChocolate} />
-            <Text style={styles.shareText}>{refreshing ? 'Refreshing...' : 'Refresh'}</Text>
-          </Pressable>
+          {/* Refresh reassigns *today's* slot, so offering it while a notification
+              quote is displayed would burn a quote off-screen and leave the banner
+              unchanged. Swapping it for the way back out keeps every visible
+              action operating on the visible quote. */}
+          {focused ? (
+            <Pressable accessibilityRole="button" onPress={() => setFocusId(undefined)} style={styles.bannerActionBtn}>
+              <Ionicons name="today-outline" size={13} color={colors.mutedChocolate} />
+              <Text style={styles.shareText}>Show today&apos;s quote</Text>
+            </Pressable>
+          ) : (
+            <Pressable accessibilityRole="button" onPress={async () => { if (refreshing) return; setRefreshing(true); try { await refreshQuoteOfDay(); } finally { setRefreshing(false); } }} style={styles.bannerActionBtn} disabled={refreshing}>
+              <Ionicons name="refresh" size={13} color={colors.mutedChocolate} />
+              <Text style={styles.shareText}>{refreshing ? 'Refreshing...' : 'Refresh'}</Text>
+            </Pressable>
+          )}
         </View>
       ) : null}
     </View>
@@ -134,7 +183,23 @@ export default function QuoteBankScreen(): ReactElement {
         placeholderTextColor={colors.taupe}
         style={styles.search}
       />
-      {collectionChips}
+      {/* Inside the shared header, so it is present in the empty-bank branch too —
+          where writing your own is the most likely first action. Kept on the
+          same row as the collection chips, right-aligned, so it reads as a
+          toolbar for the chip row rather than a separate section. */}
+      <View style={styles.chipsToolsRow}>
+        {collectionChips}
+        <View style={styles.toolRow}>
+          <Pressable accessibilityRole="button" accessibilityLabel="Write your own quote" onPress={() => setComposing(true)} style={styles.toolBtn}>
+            <Ionicons name="create-outline" size={13} color={colors.mutedChocolate} />
+            <Text style={styles.toolBtnText}>Write your own</Text>
+          </Pressable>
+          <Pressable accessibilityRole="button" accessibilityLabel="Quote history" onPress={() => router.push('/history')} style={styles.toolBtn}>
+            <Ionicons name="time-outline" size={13} color={colors.mutedChocolate} />
+            <Text style={styles.toolBtnText}>History</Text>
+          </Pressable>
+        </View>
+      </View>
     </View>
   );
 
@@ -170,10 +235,21 @@ export default function QuoteBankScreen(): ReactElement {
       ListHeaderComponent={header}
       ListEmptyComponent={emptyResults}
       renderItem={({ item }) => (
-        <Pressable style={styles.authorCard} onPress={() => router.push(`/authors/${item.id}`)}>
-          {authorPhotos[item.id] ? <Image source={authorPhotos[item.id]} style={styles.authorCardPhoto} /> : null}
-          <Text style={styles.authorCardName}>{item.authorName}</Text>
-        </Pressable>
+        // Groups of the user's own quotes have no author page behind them, so they
+        // render as a plain card rather than a Pressable that would dead-end on
+        // "Author not found."
+        // The testID identifies a group row specifically; the banner above renders
+        // an author name too, so matching on the name alone is ambiguous.
+        isCustomQuote({ authorId: item.id }) ? (
+          <View testID={`author-group-${item.id}`} style={styles.authorCard}>
+            <Text style={styles.authorCardName}>{item.authorName}</Text>
+          </View>
+        ) : (
+          <Pressable testID={`author-group-${item.id}`} accessibilityRole="button" accessibilityLabel={`View quotes by ${item.authorName}`} style={styles.authorCard} onPress={() => router.push(`/authors/${item.id}`)}>
+            {authorPhotos[item.id] ? <Image source={authorPhotos[item.id]} style={styles.authorCardPhoto} /> : null}
+            <Text style={styles.authorCardName}>{item.authorName}</Text>
+          </Pressable>
+        )
       )}
     />
   ) : (
@@ -189,6 +265,8 @@ export default function QuoteBankScreen(): ReactElement {
           quote={item}
           onDelete={() => void removeQuote(item.id)}
           onTag={() => setTaggedQuote(item)}
+          // Only the user's own words are editable; built-in text is canonical.
+          onEdit={isCustomQuote(item) ? () => setEditing(item) : undefined}
         />
       )}
     />
@@ -206,6 +284,17 @@ export default function QuoteBankScreen(): ReactElement {
           </Pressable>
         </View>
       ) : null}
+      <ComposeQuoteModal
+        visible={composing || editing !== null}
+        quote={editing}
+        onClose={() => { setComposing(false); setEditing(null); }}
+        onSubmit={(text, attribution) => {
+          // An edit keeps the id so collections and delivery history stay attached;
+          // saveQuote appends and dedupes by id, so it would be a no-op here.
+          if (editing) void updateCustomQuote(customQuoteWith(editing.id, text, attribution));
+          else void saveQuote(makeCustomQuote(text, attribution));
+        }}
+      />
       <CollectionModal
         quote={taggedQuote}
         collections={collections}
@@ -229,7 +318,10 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cream },
     banner: { backgroundColor: colors.chocolate, borderRadius: 20, padding: 22, shadowColor: colors.chocolate, shadowOpacity: .18, shadowRadius: 12, elevation: 4 },
     kicker: { fontWeight: '800', color: colors.gold, fontSize: scale(12), letterSpacing: 1.2 },
-    bannerQuote: { color: colors.white, fontSize: scale(20), lineHeight: scale(29), marginTop: 9, fontWeight: '600' },
+    // No fontWeight: Georgia has no semibold face, so '600' resolves to
+    // Georgia-Bold — heavier than the SF Semibold it replaces. The serif carries
+    // the emphasis on its own.
+    bannerQuote: { fontFamily: QUOTE_FONT, color: colors.white, fontSize: scale(20), lineHeight: scale(29), marginTop: 9 },
     bannerAuthor: { color: colors.softCream, marginTop: 9, fontSize: scale(14) },
     moreRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 16 },
     moreText: { color: colors.gold, fontWeight: '800', fontSize: scale(14) },
@@ -241,10 +333,14 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 8 },
     heading: { fontSize: scale(22), fontWeight: '800', color: colors.chocolate },
     search: { backgroundColor: colors.white, borderColor: colors.border, borderWidth: 1, borderRadius: 10, paddingVertical: 6, paddingHorizontal: 10, marginBottom: 10, fontSize: scale(13), color: colors.chocolate },
+    chipsToolsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    toolRow: { flexDirection: 'row', gap: 8, marginLeft: 8 },
+    toolBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 11 },
+    toolBtnText: { fontSize: scale(12), fontWeight: '700', color: colors.mutedChocolate },
     toggle: { flexDirection: 'row', backgroundColor: colors.border, borderRadius: 8, padding: 2, gap: 2 },
     toggleBtn: { padding: 6, borderRadius: 6 },
     toggleActive: { backgroundColor: colors.chocolate },
-    chipsScroll: { marginBottom: 12 },
+    chipsScroll: { flex: 1 },
     chipsContent: { flexDirection: 'row', gap: 7, paddingRight: 4 },
     chip: { paddingVertical: 5, paddingHorizontal: 12, borderRadius: 20, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
     chipActive: { backgroundColor: colors.chocolate, borderColor: colors.chocolate },

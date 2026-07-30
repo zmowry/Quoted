@@ -124,6 +124,13 @@ describe('Quote of the day banner', () => {
     await waitFor(() => expect(screen.getByText(other)).toBeTruthy());
   });
 
+  // Asserting the literal family rather than importing QUOTE_FONT: a test written
+  // against the constant would pass vacuously if someone emptied it.
+  it('sets the banner quote in a serif', async () => {
+    await saveQuoteAndOpenBank('einstein', BICYCLE);
+    await waitFor(() => expect(screen.getByText(CURLY_BICYCLE)).toHaveStyle({ fontFamily: 'Georgia' }));
+  });
+
   it('links from the banner to the author detail route', async () => {
     await saveQuoteAndOpenBank('einstein', BICYCLE);
     fireEvent.press(screen.getByText('More from this author'));
@@ -136,6 +143,13 @@ describe('Saved quote list', () => {
     await saveQuoteAndOpenBank('einstein', BICYCLE);
     fireEvent.press(screen.getByLabelText('Copy quote'));
     await waitFor(() => expect(Clipboard.setStringAsync).toHaveBeenCalledWith(BICYCLE_ATTRIBUTED));
+  });
+
+  it('sets the card quote in a serif', async () => {
+    await saveQuoteAndOpenBank('einstein', BICYCLE);
+    // The card uses straight quotes where the banner uses curly ones, so this
+    // matches the card's node and not the banner's.
+    expect(screen.getByText(`"${BICYCLE}"`)).toHaveStyle({ fontFamily: 'Georgia' });
   });
 
   it('groups saved quotes by author and back again', async () => {

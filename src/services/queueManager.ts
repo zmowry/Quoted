@@ -132,6 +132,66 @@ export async function nextQuoteInCycle(quotes: Quote[], order: QuoteOrder = 'seq
   return quote;
 }
 
+/** One notification that has already gone out, resolved back to its quote. */
+export interface DeliveredQuote {
+  /** `YYYY-MM-DD` for the daily slot, `YYYY-MM-DD#n` for an extra. */
+  slot: string;
+  day: string;
+  /** 0 for the daily notification, n for that day's nth extra. */
+  extra: number;
+  quote: Quote;
+}
+
+/** `missing` counts slots whose quote has since been deleted and cannot be resolved. */
+export interface DeliveredHistory { entries: DeliveredQuote[]; missing: number }
+
+/** A corrupted or unexpected suffix must not put NaN into the view. */
+const slotIndex = (slot: string): number => {
+  const hash = slot.indexOf('#');
+  if (hash === -1) return 0;
+  const parsed = Number(slot.slice(hash + 1));
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : 0;
+};
+
+/**
+ * The quotes already delivered, newest first.
+ *
+ * Assignments are written up to a fortnight AHEAD by `planRotation`, so the
+ * `<= today` filter is the whole function: without it two thirds of the result
+ * would be quotes the user has never received. Day keys sort chronologically as
+ * plain strings, the same property `prune` relies on, so a string comparison is
+ * enough.
+ *
+ * Today is included even before its delivery time has arrived: its quote is
+ * already assigned and on the banner, and the caller labels days rather than
+ * times, so nothing false is claimed. Gating on the configured time would
+ * compare against *current* settings rather than the ones in force when the day
+ * was planned; `now` is the seam if that ever needs to be stricter.
+ *
+ * Extras are ordered by slot, not by delivery time — the default extra times run
+ * 12:00, 20:00, 06:00, ..., so slot #3 actually fires before the daily one. Rows
+ * are labelled by slot and never claim a time.
+ */
+export async function deliveredHistory(
+  quotes: Quote[],
+  options: { now?: Date } = {},
+): Promise<DeliveredHistory> {
+  const today = dateKey(options.now ?? new Date());
+  const assignments = await quoteStorage.getDailyAssignments();
+  const entries: DeliveredQuote[] = [];
+  let missing = 0;
+  for (const [slot, id] of Object.entries(assignments)) {
+    if (dayOf(slot) > today) continue;
+    const quote = quotes.find((item) => item.id === id);
+    // Deleting a quote leaves past assignments dangling by design — resetPlanFrom
+    // only discards the future — so this is common rather than exotic.
+    if (!quote) { missing++; continue; }
+    entries.push({ slot, day: dayOf(slot), extra: slotIndex(slot), quote });
+  }
+  entries.sort((a, b) => a.day === b.day ? a.extra - b.extra : b.day.localeCompare(a.day));
+  return { entries, missing };
+}
+
 export async function reconcileQueue(quotes: Quote[]): Promise<void> {
   const queue = await quoteStorage.getQueue();
   await quoteStorage.setQueue({ shownIds: queue.shownIds.filter((id) => quotes.some((quote) => quote.id === id)) });

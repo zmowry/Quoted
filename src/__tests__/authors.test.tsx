@@ -85,6 +85,14 @@ describe('Authors list', () => {
     expect(screen.queryByText('Matching quotes')).toBeNull();
   });
 
+  it('sets a matched quote in a serif, keeping its italic', async () => {
+    renderWithProviders(<AuthorsScreen />);
+    fireEvent.changeText(screen.getByLabelText('Search authors'), 'riding a bicycle');
+    // Both together: fontFamily + fontStyle is what resolves the real
+    // Georgia-Italic face, so the italic is pinned against a careless overwrite.
+    await waitFor(() => expect(screen.getByText(/riding a bicycle/)).toHaveStyle({ fontFamily: 'Georgia', fontStyle: 'italic' }));
+  });
+
   it('shows no quote matches section for a search with no results', async () => {
     renderWithProviders(<AuthorsScreen />);
     fireEvent.changeText(screen.getByLabelText('Search authors'), 'zzzzz');

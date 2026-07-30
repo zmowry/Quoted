@@ -41,6 +41,17 @@ const read = async <T,>(key: string, fallback: T): Promise<T> => {
 export const quoteStorage = {
   async getQuotes(): Promise<Quote[]> { return read(KEYS.quotes, []); },
   async saveQuote(quote: Quote): Promise<Quote[]> { const quotes = await this.getQuotes(); const next = quotes.some((item) => item.id === quote.id) ? quotes : [...quotes, quote]; await AsyncStorage.setItem(KEYS.quotes, JSON.stringify(next)); return next; },
+  /**
+   * Replaces a quote in place by id, leaving the array order untouched so an
+   * edited quote does not jump position in the user's list. A no-op for an id
+   * that is not present.
+   *
+   * Deliberately separate from `saveQuote`, which dedupes by id and *appends*:
+   * routing an edit through that is a silent no-op, so a typo would be
+   * uncorrectable except by deleting and rewriting — which changes the id and
+   * loses the quote's collections and its delivery history.
+   */
+  async updateQuote(quote: Quote): Promise<Quote[]> { const next = (await this.getQuotes()).map((item) => item.id === quote.id ? quote : item); await AsyncStorage.setItem(KEYS.quotes, JSON.stringify(next)); return next; },
   async deleteQuote(id: string): Promise<Quote[]> { const next = (await this.getQuotes()).filter((quote) => quote.id !== id); await AsyncStorage.setItem(KEYS.quotes, JSON.stringify(next)); return next; },
   async getQueue(): Promise<QueueState> { return read(KEYS.queue, { shownIds: [] }); },
   async setQueue(queue: QueueState): Promise<void> { await AsyncStorage.setItem(KEYS.queue, JSON.stringify(queue)); },
