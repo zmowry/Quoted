@@ -13,6 +13,28 @@ const renderedNames = (): string[] => screen.getAllByText(MA_AUTHORS).map((node)
 
 beforeEach(async () => { await AsyncStorage.clear(); jest.clearAllMocks(); });
 
+describe('Author catalogue', () => {
+  // Quote ids are the primary key for saved quotes, collections and the day
+  // assignments history is read from, so a duplicate introduced while adding an
+  // author would quietly merge two different quotes everywhere at once.
+  it('gives every quote a unique id', () => {
+    const ids = authorsData.flatMap((author) => author.quotes.map((quote) => quote.id));
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  it('gives every author a unique id', () => {
+    const ids = authorsData.map((author) => author.id);
+    expect(new Set(ids).size).toBe(ids.length);
+  });
+
+  // authorById is how a saved quote finds its way back to an author page.
+  it('files every quote under the author that owns it', () => {
+    for (const author of authorsData) {
+      for (const quote of author.quotes) expect(quote.authorId).toBe(author.id);
+    }
+  });
+});
+
 describe('Authors list', () => {
   it('filters the list by a case-insensitive search', async () => {
     renderWithProviders(<AuthorsScreen />);

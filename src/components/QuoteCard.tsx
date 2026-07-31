@@ -6,6 +6,7 @@ import { useRouter } from 'expo-router';
 import type { Quote } from '@/src/types';
 import { quoteWithAttribution } from '@/src/format';
 import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
+import { useQuoteShare } from '@/src/hooks/useQuoteShare';
 import { isCustomQuote } from '@/src/customQuotes';
 import { useTheme } from '@/src/hooks/useTheme';
 import { QUOTE_FONT } from '@/src/theme';
@@ -23,6 +24,8 @@ export function QuoteCard({ quote, onDelete, onTag, onEdit }: Props): ReactEleme
   const styles = useMemo(() => makeStyles(colors, scale), [colors, scale]);
   const router = useRouter();
   const { copied, copy } = useCopyFeedback();
+  const { sharingId, shareQuote } = useQuoteShare();
+  const sharing = sharingId === quote.id;
   // A quote the user wrote has no author record, so linking it would land on
   // "Author not found." The check lives here rather than in a prop from the
   // screen so every caller — including the history list — gets it for free.
@@ -42,6 +45,11 @@ export function QuoteCard({ quote, onDelete, onTag, onEdit }: Props): ReactEleme
         <View style={styles.actions}>
           <Pressable onPress={() => void copy(quoteWithAttribution(quote))} accessibilityLabel="Copy quote" style={styles.actionBtn}>
             <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={14} color={copied ? colors.caramel : colors.taupe} />
+          </Pressable>
+          {/* Available on every card, including history: sharing reads the quote
+              rather than mutating the bank, so it is safe where editing is not. */}
+          <Pressable onPress={() => shareQuote(quote)} accessibilityLabel={`Share ${quote.text}`} disabled={sharing} style={styles.actionBtn}>
+            <Ionicons name="share-outline" size={14} color={sharing ? colors.caramel : colors.taupe} />
           </Pressable>
           {onTag ? (
             <Pressable onPress={onTag} accessibilityLabel="Add to collection" style={styles.actionBtn}>

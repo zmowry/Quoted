@@ -2,6 +2,7 @@ import type { ReactElement } from 'react';
 import { Stack } from 'expo-router';
 import { useNotificationRoute } from '@/src/hooks/useNotificationRoute';
 import { QuoteBankProvider } from '@/src/hooks/useQuoteBank';
+import { QuoteShareProvider } from '@/src/hooks/useQuoteShare';
 import { ThemeProvider, useTheme } from '@/src/hooks/useTheme';
 
 /**
@@ -32,5 +33,5 @@ function RootStack(): ReactElement {
 export default function RootLayout(): ReactElement {
   // Mounted for the whole app, so a tap is picked up whichever screen is showing.
   useNotificationRoute();
-  return <ThemeProvider><QuoteBankProvider><RootStack /></QuoteBankProvider></ThemeProvider>;
+  return <ThemeProvider><QuoteBankProvider><QuoteShareProvider><RootStack /></QuoteShareProvider></QuoteBankProvider></ThemeProvider>;
 }

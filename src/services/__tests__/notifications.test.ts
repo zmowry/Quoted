@@ -18,6 +18,14 @@ const planFrom = (days: number, quotes: (Quote | undefined)[], extras: Quote[] =
     return { day, quote: quotes[i % quotes.length], extras };
   });
 
+/**
+ * Which collection each slot draws from is settled by the time a plan reaches
+ * the scheduler — it only reads `enabled`, `count` and `times` — so these fixtures
+ * leave the ids off rather than pretending to exercise them.
+ */
+const extrasSettings = (settings: Omit<AdditionalQuotesSettings, 'collectionIds'>): AdditionalQuotesSettings =>
+  ({ ...settings, collectionIds: [] });
+
 const requests = (): { content: { body: string; sound: boolean; data?: { quoteId?: string; authorId?: string } }; trigger: { type: string; date: Date } }[] =>
   (Notifications.scheduleNotificationAsync as jest.Mock).mock.calls.map(([request]) => request);
 const bodies = (): string[] => requests().map((request) => request.content.body);
@@ -69,7 +77,7 @@ describe('scheduleAllNotifications', () => {
   });
 
   it('adds one extra notification per requested count on every planned day', async () => {
-    const extra: AdditionalQuotesSettings = { enabled: true, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 30 }] };
+    const extra = extrasSettings({ enabled: true, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 30 }] });
     // The extras come from the plan, which drew them from the same cycle as the
     // daily quote, rather than being picked off by array position here.
     await scheduleAllNotifications(nine, planFrom(2, [quote], [second, third]), extra, { now: NOW });
@@ -85,13 +93,13 @@ describe('scheduleAllNotifications', () => {
   });
 
   it('schedules only the daily quote when additional quotes are disabled', async () => {
-    const extra: AdditionalQuotesSettings = { enabled: false, count: 3, times: [{ hour: 12, minute: 0 }] };
+    const extra = extrasSettings({ enabled: false, count: 3, times: [{ hour: 12, minute: 0 }] });
     await scheduleAllNotifications(nine, planFrom(1, [quote], [second]), extra, { now: NOW });
     expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
   });
 
   it('never schedules more extras than it has times for', async () => {
-    const extra: AdditionalQuotesSettings = { enabled: true, count: 5, times: [{ hour: 12, minute: 0 }] };
+    const extra = extrasSettings({ enabled: true, count: 5, times: [{ hour: 12, minute: 0 }] });
     await scheduleAllNotifications(nine, planFrom(1, [quote], [second, third]), extra, { now: NOW });
     expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(2);
   });
@@ -105,7 +113,7 @@ describe('scheduleAllNotifications', () => {
   });
 
   it('tags an extra with its own quote, not the day\'s daily one', async () => {
-    const extra: AdditionalQuotesSettings = { enabled: true, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 30 }] };
+    const extra = extrasSettings({ enabled: true, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 30 }] });
     await scheduleAllNotifications(nine, planFrom(1, [quote], [second, third]), extra, { now: NOW });
     expect(quoteIds()).toEqual(['a', 'b', 'c']);
   });

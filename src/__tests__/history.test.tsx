@@ -113,3 +113,54 @@ describe('Quote history', () => {
     await waitFor(() => expect(router.push).toHaveBeenCalledWith('/history'));
   });
 });
+
+describe('Delivery stats', () => {
+  it('summarises a first delivery above the list', async () => {
+    await seedAndPlan();
+    await openHistory();
+
+    // Value and label are separate nodes, so the singular label is what proves
+    // the count rather than a combined string.
+    await screen.findByTestId('delivery-stats');
+    expect(screen.getByText('day streak')).toBeTruthy();
+    expect(screen.getByText('quote delivered')).toBeTruthy();
+    expect(screen.getByText(/Best run in the last 21 days: 1 day/)).toBeTruthy();
+    expect(screen.getByText(/Most delivered: Albert Einstein \(1\)/)).toBeTruthy();
+  });
+
+  it('reports cycle progress against the bank', async () => {
+    await seedAndPlan();
+    await openHistory();
+
+    // One quote saved, one drawn for today.
+    await screen.findByTestId('delivery-stats');
+    expect(screen.getByText('1/1')).toBeTruthy();
+    expect(screen.getByText('this cycle')).toBeTruthy();
+  });
+
+  it('stays hidden until something has actually been delivered', async () => {
+    await openHistory();
+    await screen.findByText('No history yet');
+    expect(screen.queryByTestId('delivery-stats')).toBeNull();
+  });
+
+  // Emptying the bank deliberately wipes the assignments the stats are derived
+  // from, so it takes the figures with it — the same rule the history list
+  // already follows. That a *surviving* bank keeps its streak when one delivered
+  // quote is deleted is covered deterministically in the queueManager tests,
+  // where the day the quote fell on can be fixed rather than left to shuffle.
+  it('goes with the record when the bank is emptied', async () => {
+    await seedAndPlan();
+
+    const bank = renderWithProviders(<QuoteBankScreen />);
+    await screen.findByText('My saved quotes');
+    await flushPending();
+    fireEvent.press(screen.getByLabelText(`Delete ${BICYCLE}`));
+    await flushPending();
+    bank.unmount();
+
+    await openHistory();
+    await screen.findByText('No history yet');
+    expect(screen.queryByTestId('delivery-stats')).toBeNull();
+  });
+});

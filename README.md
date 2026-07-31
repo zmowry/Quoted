@@ -4,15 +4,17 @@ An Expo Router + TypeScript iOS app for collecting quotes from famous authors, s
 
 ## Features
 
-- Browse 240 quotes from 20 authors (with bios and photos) and save the ones you like to "My Bank"
+- Browse 504 quotes from 42 authors (with bios and photos) and save the ones you like to "My Bank"
+- Every author is tagged with 3-8 themes (stoicism, resilience, humor, ...) from a fixed vocabulary; filter the author list by theme, or search for one by name
 - Quote of the Day banner that cycles through your saved quotes without repeating until all have been shown
-- Share the quote of the day as an image, or copy any quote to the clipboard
+- Share any quote as an image — from the banner, the bank, an author page, or your history — or copy it to the clipboard
 - Write your own quotes with your own attribution; they join the same rotation, collections, and notifications as saved ones
 - Organize saved quotes into custom collections and filter the bank by them
-- Quote history showing what has already been delivered, up to 21 days back
+- Scope delivery to a single collection, so only quotes you have filed there are sent
+- Quote history showing what has already been delivered, up to 21 days back, with delivery streaks and cycle progress
 - Tapping a notification opens the app on the quote that was delivered
-- Configurable daily notification time, plus optional additional notifications (1-5/day) at custom times
-- Light/dark mode and adjustable text size, both persisted
+- Configurable daily notification time, plus optional additional notifications (1-5/day), each with its own time and its own collection to draw from
+- Light/dark/system appearance and adjustable text size, both persisted, under one Display setting
 
 ## Tech stack
 
@@ -20,7 +22,7 @@ An Expo Router + TypeScript iOS app for collecting quotes from famous authors, s
 - React Native 0.81, React 19
 - TypeScript 5.9 (strict)
 - AsyncStorage for local, on-device persistence (no backend)
-- Jest + React Native Testing Library — 55 tests across 8 suites
+- Jest + React Native Testing Library — 254 tests across 19 suites
 
 ## Project structure
 
@@ -97,4 +99,30 @@ npx eas build --profile preview --platform ios
   as does uninstalling the app. A deleted quote can be restored only within the
   six-second undo window.
 - Quote history is derived from the day-assignment records the scheduler already keeps,
-  so it shows only quotes still in your bank, and emptying the bank clears it.
+  so it shows only quotes still in your bank, and emptying the bank clears it. Streaks are
+  counted from those same records but from the *days* rather than the quotes, so deleting a
+  quote does not punch a hole in a run you actually received. Both streak figures are bounded
+  by the 21 days of assignments retained.
+- Scoping delivery to a collection falls back to the whole bank if that collection is deleted
+  or holds none of your saved quotes — silently delivering nothing would be the worse failure.
+  The settings screen says when the fallback is in effect.
+- Each extra notification slot can draw from its own collection, defaulting to "same as daily"
+  rather than to the whole bank, so narrowing the daily scope narrows the extras with it. The
+  no-repeat cycle is shared across every pool — a quote sent as an extra is not repeated as the
+  daily one — but exhausting one pool clears only that pool's progress, so a small collection on
+  an extra slot cannot reset the whole bank's rotation every few days.
+- Some authors have no photo yet and render as an initial instead. Adding one means dropping the
+  image at `assets/authors/<id>.jpg` and registering it in `src/data/authorPhotos.ts`; Metro
+  cannot resolve a dynamic `require`, so the map has to be written out by hand.
+- Quotes are picked for provenance: each traces to a named work, or to an ancient source that
+  attributes it directly. Several very famous lines are deliberately absent because they belong
+  to someone else — "we are what we repeatedly do" is Will Durant paraphrasing Aristotle,
+  "between stimulus and response there is a space" is Stephen Covey rather than Frankl, and
+  "a goal without a plan is just a wish" appears nowhere in Saint-Exupéry. Popularity is not
+  evidence; if a line cannot be placed in a work, it does not go in.
+- Appearance defaults to Light rather than System. The palette is a deliberately warm
+  cream-and-chocolate one, and a dark-mode phone should not meet the inverted version of it on
+  first launch. System remains an option in settings.
+- Themes are tagged per author rather than per quote, so a quote inherits its author's themes
+  and quotes you wrote yourself have none. `src/data/themes.ts` is the closed vocabulary;
+  adding a tag outside it is a type error.

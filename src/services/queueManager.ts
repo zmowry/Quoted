@@ -1,5 +1,68 @@
-import type { DailyAssignments, PlannedDay, Quote, QuoteOrder } from '@/src/types';
+import type { AdditionalQuotesSettings, Collection, DailyAssignments, PlannedDay, Quote, QuoteOrder } from '@/src/types';
 import { quoteStorage } from './storage';
+
+/**
+ * The quotes the rotation may draw from, given the user's delivery scope.
+ *
+ * Falls back to the whole bank in two cases that would otherwise be silent dead
+ * ends: the chosen collection has been deleted, and the chosen collection is
+ * empty. Both would leave someone with a full bank receiving "No quotes saved!"
+ * every morning because of a collection they had forgotten about. Delivering
+ * something from the wider bank is the better failure, and the settings screen
+ * says so rather than leaving the fallback invisible.
+ */
+export function deliveryPool(quotes: Quote[], collections: Collection[], collectionId: string | null): Quote[] {
+  if (!collectionId) return quotes;
+  const collection = collections.find((item) => item.id === collectionId);
+  if (!collection) return quotes;
+  const scoped = quotes.filter((quote) => collection.quoteIds.includes(quote.id));
+  return scoped.length ? scoped : quotes;
+}
+
+/** Whether `deliveryPool` is actually honouring the chosen collection. */
+export const deliveryScopeActive = (quotes: Quote[], collections: Collection[], collectionId: string | null): boolean => {
+  if (!collectionId) return false;
+  const collection = collections.find((item) => item.id === collectionId);
+  return !!collection && quotes.some((quote) => collection.quoteIds.includes(quote.id));
+};
+
+/** How many extra notifications a day's settings actually resolve to. */
+export const extraSlotCount = (extras: AdditionalQuotesSettings): number =>
+  extras.enabled ? Math.max(0, Math.min(extras.count, extras.times.length)) : 0;
+
+/**
+ * Every pool one day's notifications can draw from: the daily quote's, one per
+ * extra slot, and the union of them all.
+ *
+ * `all` is what the cycle bookkeeping needs — `reconcileQueue` and
+ * `resetPlanFrom` both decide whether a shown id is still real, and judging that
+ * against the daily pool alone would throw away an extra slot's progress every
+ * time its collection sat outside the main scope.
+ */
+export interface RotationPools { main: Quote[]; extras: Quote[][]; all: Quote[] }
+
+export function rotationPools(
+  quotes: Quote[],
+  collections: Collection[],
+  collectionId: string | null,
+  extras: AdditionalQuotesSettings,
+): RotationPools {
+  const main = deliveryPool(quotes, collections, collectionId);
+  const extraPools = Array.from({ length: extraSlotCount(extras) }, (_, slot) => {
+    // null means "follow the daily scope", so the slot tracks `main` rather than
+    // widening to the whole bank behind the user's back.
+    const id = extras.collectionIds[slot] ?? null;
+    return id === null ? main : deliveryPool(quotes, collections, id);
+  });
+  const seen = new Set<string>();
+  const all: Quote[] = [];
+  for (const quote of [main, ...extraPools].flat()) {
+    if (seen.has(quote.id)) continue;
+    seen.add(quote.id);
+    all.push(quote);
+  }
+  return { main, extras: extraPools, all };
+}
 
 /** Days of assignment history kept; comfortably more than the planned horizon. */
 const ASSIGNMENT_RETENTION = 21;
@@ -70,13 +133,18 @@ export async function reassignDate(key: string, quotes: Quote[], order: QuoteOrd
  * Extra quotes draw from the same cycle as the daily one rather than being
  * picked off by array position, so the "every quote once before any repeats"
  * guarantee covers every notification the user actually receives.
+ *
+ * `extraPools` narrows an individual slot to its own collection. The cycle stays
+ * shared across all of them, so a quote sent as an extra is still marked as seen
+ * for the daily rotation; only the set it is drawn from differs. A slot with no
+ * pool of its own falls back to `quotes`.
  */
 export async function planRotation(
   quotes: Quote[],
   order: QuoteOrder = 'sequential',
-  options: { days?: number; extras?: number; from?: Date } = {},
+  options: { days?: number; extras?: number; from?: Date; extraPools?: Quote[][] } = {},
 ): Promise<PlannedDay[]> {
-  const { days = 1, extras = 0, from = new Date() } = options;
+  const { days = 1, extras = 0, from = new Date(), extraPools } = options;
   const plan: PlannedDay[] = [];
   for (let i = 0; i < days; i++) {
     const day = new Date(from);
@@ -85,7 +153,8 @@ export async function planRotation(
     const quote = await quoteForDate(key, quotes, order);
     const extraQuotes: Quote[] = [];
     for (let slot = 0; slot < extras; slot++) {
-      const drawn = await quoteForDate(slotKey(key, slot), quotes, order);
+      const pool = extraPools?.[slot] ?? quotes;
+      const drawn = await quoteForDate(slotKey(key, slot), pool, order);
       if (drawn) extraQuotes.push(drawn);
     }
     plan.push({ day, quote, extras: extraQuotes });
@@ -120,6 +189,11 @@ export async function resetPlanFrom(key: string, quotes: Quote[]): Promise<void>
  * 'shuffle' randomises only *which* of the unseen quotes comes next, so the
  * no-repeat guarantee still holds — every quote is still shown once per cycle,
  * just in an unpredictable order rather than save order.
+ *
+ * The shown list is shared by every pool, but exhausting one pool only clears
+ * that pool's ids from it. Wiping the list wholesale — which is all this needed
+ * to do when there was a single pool — would let a three-quote collection on an
+ * extra slot reset the whole bank's rotation every third day.
  */
 export async function nextQuoteInCycle(quotes: Quote[], order: QuoteOrder = 'sequential'): Promise<Quote | undefined> {
   if (!quotes.length) { await quoteStorage.setQueue({ shownIds: [] }); return undefined; }
@@ -127,7 +201,11 @@ export async function nextQuoteInCycle(quotes: Quote[], order: QuoteOrder = 'seq
   const available = quotes.filter((quote) => !shownIds.includes(quote.id));
   const cycle = available.length ? available : quotes;
   const quote = order === 'shuffle' ? cycle[Math.floor(Math.random() * cycle.length)] : cycle[0];
-  const nextShown = available.length ? [...shownIds, quote.id] : [quote.id];
+  // With one pool covering the whole bank this reduces to [quote.id], exactly as
+  // before: every shown id is one of `quotes`, so the filter empties the list.
+  const nextShown = available.length
+    ? [...shownIds, quote.id]
+    : [...shownIds.filter((id) => !quotes.some((item) => item.id === id)), quote.id];
   await quoteStorage.setQueue({ shownIds: nextShown });
   return quote;
 }
@@ -190,6 +268,93 @@ export async function deliveredHistory(
   }
   entries.sort((a, b) => a.day === b.day ? a.extra - b.extra : b.day.localeCompare(a.day));
   return { entries, missing };
+}
+
+/** The calendar day before `key`, as a `YYYY-MM-DD` local key. */
+const previousDay = (key: string): string => {
+  const [year, month, day] = key.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() - 1);
+  return dateKey(date);
+};
+
+export interface DeliveryStats {
+  /** Consecutive delivery days ending today, or yesterday if today has none yet. */
+  currentStreak: number;
+  /** Longest run of consecutive days, bounded by `ASSIGNMENT_RETENTION`. */
+  bestStreak: number;
+  /** Delivered slots up to and including today, extras included. */
+  totalDelivered: number;
+  /** Distinct days with at least one delivery. */
+  daysDelivered: number;
+  /** Most-delivered author whose quotes are still in the bank. */
+  topAuthor?: { name: string; count: number };
+  /** Progress through the current no-repeat cycle. */
+  cycle: { shown: number; total: number };
+}
+
+/**
+ * Delivery statistics, derived from the day assignments the scheduler keeps.
+ *
+ * Streaks are counted from the raw assignment *days* rather than from
+ * `deliveredHistory`, which drops slots whose quote has since been deleted.
+ * Routing streaks through that would let removing one quote retroactively punch
+ * a hole in a run the user genuinely received — the day happened either way.
+ *
+ * `topAuthor` is the one figure that does need the quote resolved, so deleted
+ * quotes are simply not attributed to anyone.
+ *
+ * Both streaks are capped by how much history is retained: `ASSIGNMENT_RETENTION`
+ * is 21 days, so a longer run reads as 21 and the caller labels it as a window
+ * rather than an all-time record.
+ */
+export async function deliveryStats(
+  quotes: Quote[],
+  pool: Quote[] = quotes,
+  options: { now?: Date } = {},
+): Promise<DeliveryStats> {
+  const today = dateKey(options.now ?? new Date());
+  const [assignments, queue] = await Promise.all([quoteStorage.getDailyAssignments(), quoteStorage.getQueue()]);
+
+  const delivered = Object.entries(assignments).filter(([slot]) => dayOf(slot) <= today);
+  const days = new Set(delivered.map(([slot]) => dayOf(slot)));
+
+  // Today counting as a grace day: its quote is assigned when the day is planned,
+  // but an empty bank plans nothing, and a streak should not read as broken at
+  // 00:01 before that morning's delivery has had a chance to happen.
+  let cursor = days.has(today) ? today : previousDay(today);
+  let currentStreak = 0;
+  while (days.has(cursor)) { currentStreak++; cursor = previousDay(cursor); }
+
+  let bestStreak = 0;
+  let run = 0;
+  let previous: string | undefined;
+  for (const day of [...days].sort()) {
+    run = previous !== undefined && previousDay(day) === previous ? run + 1 : 1;
+    if (run > bestStreak) bestStreak = run;
+    previous = day;
+  }
+
+  const counts = new Map<string, number>();
+  for (const [, id] of delivered) {
+    const quote = quotes.find((item) => item.id === id);
+    if (!quote) continue;
+    counts.set(quote.authorName, (counts.get(quote.authorName) ?? 0) + 1);
+  }
+  // Ties break alphabetically so the figure does not flicker between equally
+  // delivered authors as unrelated storage writes reorder the assignment map.
+  const [topAuthor] = [...counts.entries()]
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+  return {
+    currentStreak,
+    bestStreak,
+    totalDelivered: delivered.length,
+    daysDelivered: days.size,
+    topAuthor,
+    cycle: { shown: queue.shownIds.filter((id) => pool.some((quote) => quote.id === id)).length, total: pool.length },
+  };
 }
 
 export async function reconcileQueue(quotes: Quote[]): Promise<void> {

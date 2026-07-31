@@ -4,7 +4,14 @@ import type { AdditionalQuotesSettings, Collection, DailyAssignments, Notificati
 export const DEFAULT_NOTIFICATION_TIME: NotificationTime = { hour: 9, minute: 0 };
 export const DEFAULT_QUOTE_ORDER: QuoteOrder = 'shuffle';
 export const DEFAULT_SOUND_ENABLED = true;
-export const DEFAULT_EXTRA_QUOTES: AdditionalQuotesSettings = { enabled: false, count: 2, times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 0 }, { hour: 6, minute: 0 }, { hour: 15, minute: 0 }, { hour: 18, minute: 0 }] };
+/** How many extra notifications a day the settings screen offers. */
+export const MAX_EXTRA_QUOTES = 5;
+export const DEFAULT_EXTRA_QUOTES: AdditionalQuotesSettings = {
+  enabled: false,
+  count: 2,
+  times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 0 }, { hour: 6, minute: 0 }, { hour: 15, minute: 0 }, { hour: 18, minute: 0 }],
+  collectionIds: [null, null, null, null, null],
+};
 const DEFAULT_EXTRA = DEFAULT_EXTRA_QUOTES;
 
 /**
@@ -23,6 +30,7 @@ export const STORAGE_KEYS = {
   order: '@quote-bank/quote-order',
   sound: '@quote-bank/sound',
   assignments: '@quote-bank/daily-assignments',
+  deliveryCollection: '@quote-bank/delivery-collection',
 } as const;
 
 const KEYS = STORAGE_KEYS;
@@ -57,7 +65,20 @@ export const quoteStorage = {
   async setQueue(queue: QueueState): Promise<void> { await AsyncStorage.setItem(KEYS.queue, JSON.stringify(queue)); },
   async getNotificationTime(): Promise<NotificationTime> { return read(KEYS.time, DEFAULT_NOTIFICATION_TIME); },
   async setNotificationTime(time: NotificationTime): Promise<void> { await AsyncStorage.setItem(KEYS.time, JSON.stringify(time)); },
-  async getAdditionalQuotes(): Promise<AdditionalQuotesSettings> { return read(KEYS.extra, DEFAULT_EXTRA); },
+  /**
+   * Settings written by a build without per-slot collections have no
+   * `collectionIds` at all, so the array is rebuilt to full length on every read
+   * rather than migrated in place. That keeps `collectionIds[i]` safe to index
+   * for any slot the UI can offer, whatever shape landed on disk.
+   */
+  async getAdditionalQuotes(): Promise<AdditionalQuotesSettings> {
+    const stored = await read(KEYS.extra, DEFAULT_EXTRA);
+    const ids = Array.isArray(stored.collectionIds) ? stored.collectionIds : [];
+    return {
+      ...stored,
+      collectionIds: Array.from({ length: MAX_EXTRA_QUOTES }, (_, i) => ids[i] ?? null),
+    };
+  },
   async setAdditionalQuotes(settings: AdditionalQuotesSettings): Promise<void> { await AsyncStorage.setItem(KEYS.extra, JSON.stringify(settings)); },
   // Stored as a bare string rather than JSON; validated on read so an unexpected
   // value falls back to the default instead of reaching the picker logic.
@@ -67,6 +88,18 @@ export const quoteStorage = {
   async setSoundEnabled(enabled: boolean): Promise<void> { await AsyncStorage.setItem(KEYS.sound, JSON.stringify(enabled)); },
   async getDailyAssignments(): Promise<DailyAssignments> { return read(KEYS.assignments, {}); },
   async setDailyAssignments(assignments: DailyAssignments): Promise<void> { await AsyncStorage.setItem(KEYS.assignments, JSON.stringify(assignments)); },
+  /**
+   * Which collection the daily rotation draws from; `null` means the whole bank.
+   *
+   * Stored as a bare id string rather than JSON, so absence and "all quotes" are
+   * the same thing on disk and an upgrade from a build without this key lands on
+   * the default with no migration.
+   */
+  async getDeliveryCollection(): Promise<string | null> { return AsyncStorage.getItem(KEYS.deliveryCollection); },
+  async setDeliveryCollection(id: string | null): Promise<void> {
+    if (id === null) await AsyncStorage.removeItem(KEYS.deliveryCollection);
+    else await AsyncStorage.setItem(KEYS.deliveryCollection, id);
+  },
   async getCollections(): Promise<Collection[]> { return read(KEYS.collections, []); },
   async setCollections(collections: Collection[]): Promise<void> { await AsyncStorage.setItem(KEYS.collections, JSON.stringify(collections)); },
   /**

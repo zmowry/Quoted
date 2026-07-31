@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { MAX_EXTRA_QUOTES } from '@/src/services/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { isCustomQuote } from '@/src/customQuotes';
 import { useNotificationPermission } from '@/src/hooks/useNotificationPermission';
@@ -49,7 +50,7 @@ function TimePicker({ value, label, onChange, compact = false, colors, scale }: 
 }
 
 export default function SettingsScreen(): ReactElement {
-  const { notificationTime, additionalQuotes, quotes, collections, loading, updateNotificationTime, updateAdditionalQuotes, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled } = useQuoteBank();
+  const { notificationTime, additionalQuotes, quotes, collections, loading, updateNotificationTime, updateAdditionalQuotes, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled, deliveryCollectionId, updateDeliveryCollection, deliveryPool, extraPools } = useQuoteBank();
   const { colors, mode, resolvedMode, setMode, textSize, setTextSize, scale } = useTheme();
   const { status: permissionStatus, request: requestPermission, openSystemSettings } = useNotificationPermission();
   // 'unknown' means the check itself failed; stay quiet rather than raise a false alarm.
@@ -69,6 +70,7 @@ export default function SettingsScreen(): ReactElement {
   const [extraEnabled, setExtraEnabled] = useState(additionalQuotes.enabled);
   const [extraCount, setExtraCount] = useState(additionalQuotes.count);
   const [extraTimes, setExtraTimes] = useState<TimeState[]>(additionalQuotes.times.map(fromNT));
+  const [extraCollections, setExtraCollections] = useState<(string | null)[]>(additionalQuotes.collectionIds);
   const [extraSaved, setExtraSaved] = useState(false);
 
   // Stored settings arrive asynchronously, so seed the form from them exactly once.
@@ -83,6 +85,7 @@ export default function SettingsScreen(): ReactElement {
     setExtraEnabled(additionalQuotes.enabled);
     setExtraCount(additionalQuotes.count);
     setExtraTimes(additionalQuotes.times.map(fromNT));
+    setExtraCollections(additionalQuotes.collectionIds);
   }, [loading, notificationTime, additionalQuotes]);
 
   const markDirty = (): void => setExtraSaved(false);
@@ -90,9 +93,21 @@ export default function SettingsScreen(): ReactElement {
   const saveExtra = async (): Promise<void> => {
     const parsed = extraTimes.map(toNT);
     if (parsed.some((t) => t === null)) { Alert.alert('Use valid times', 'Each hour must be 1-12 and minute 0-59.'); return; }
-    const newSettings: AdditionalQuotesSettings = { enabled: extraEnabled, count: extraCount, times: parsed as NotificationTime[] };
+    const newSettings: AdditionalQuotesSettings = {
+      enabled: extraEnabled,
+      count: extraCount,
+      times: parsed as NotificationTime[],
+      // Padded rather than trimmed to the current count, so turning the count
+      // back up restores the collection each slot had before.
+      collectionIds: Array.from({ length: MAX_EXTRA_QUOTES }, (_, i) => extraCollections[i] ?? null),
+    };
     await updateAdditionalQuotes(newSettings);
     setExtraSaved(true);
+  };
+
+  const setSlotCollection = (slot: number, id: string | null): void => {
+    setExtraCollections((prev) => Array.from({ length: MAX_EXTRA_QUOTES }, (_, i) => i === slot ? id : (prev[i] ?? null)));
+    markDirty();
   };
 
   const modeOptions: { value: ThemeMode; label: string }[] = [
@@ -130,8 +145,12 @@ export default function SettingsScreen(): ReactElement {
     );
   };
 
+  // True when a collection is chosen but `deliveryPool` has widened back to the
+  // whole bank, i.e. that collection holds none of the user's saved quotes.
+  const scopeFellBack = deliveryCollectionId !== null
+    && !quotes.filter((q) => collections.find((c) => c.id === deliveryCollectionId)?.quoteIds.includes(q.id)).length;
+
   const [openDisplay, setOpenDisplay] = useState(false);
-  const [openTextSize, setOpenTextSize] = useState(false);
   const [openDelivery, setOpenDelivery] = useState(false);
   const [openExtra, setOpenExtra] = useState(false);
   const [openData, setOpenData] = useState(false);
@@ -166,13 +185,17 @@ export default function SettingsScreen(): ReactElement {
         </View>
       ) : null}
 
+      {/* Appearance and text size are one card: two collapsed headers for two
+          three-button rows was more chrome than content, and both answer the same
+          question about how the app looks. */}
       <View style={styles.card}>
         <Pressable style={styles.cardHeader} onPress={() => setOpenDisplay((v) => !v)}>
-          <Text style={styles.cardTitle}>Display mode</Text>
+          <Text style={styles.cardTitle}>Display</Text>
           <Ionicons name={openDisplay ? 'chevron-up' : 'chevron-down'} size={16} color={colors.mutedChocolate} />
         </Pressable>
         {openDisplay ? (
           <View style={styles.cardBody}>
+            <Text style={styles.label}>Display mode</Text>
             <View style={styles.modeRow}>
               {modeOptions.map(({ value, label }) => (
                 <Pressable key={value} onPress={() => void setMode(value)} style={[styles.modeBtn, mode === value && styles.modeBtnActive]}>
@@ -181,17 +204,8 @@ export default function SettingsScreen(): ReactElement {
               ))}
             </View>
             {mode === 'system' ? <Text style={styles.copy}>Following your device appearance ({resolvedMode}).</Text> : null}
-          </View>
-        ) : null}
-      </View>
 
-      <View style={styles.card}>
-        <Pressable style={styles.cardHeader} onPress={() => setOpenTextSize((v) => !v)}>
-          <Text style={styles.cardTitle}>Text size</Text>
-          <Ionicons name={openTextSize ? 'chevron-up' : 'chevron-down'} size={16} color={colors.mutedChocolate} />
-        </Pressable>
-        {openTextSize ? (
-          <View style={styles.cardBody}>
+            <Text style={[styles.label, { marginTop: 18 }]}>Text size</Text>
             <View style={styles.modeRow}>
               {textSizeOptions.map(({ value, label }) => (
                 <Pressable key={value} onPress={() => void setTextSize(value)} style={[styles.modeBtn, textSize === value && styles.modeBtnActive]}>
@@ -231,6 +245,55 @@ export default function SettingsScreen(): ReactElement {
                 : 'Works through your saved quotes in the order you saved them.'}
             </Text>
 
+            <Text style={[styles.label, { marginTop: 18 }]}>Which quotes can be delivered?</Text>
+            <View style={styles.scopeList}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ selected: deliveryCollectionId === null }}
+                onPress={() => void updateDeliveryCollection(null)}
+                style={[styles.scopeRow, deliveryCollectionId === null && styles.scopeRowActive]}
+              >
+                <Ionicons name={deliveryCollectionId === null ? 'radio-button-on' : 'radio-button-off'} size={16} color={deliveryCollectionId === null ? colors.caramel : colors.taupe} />
+                <Text style={[styles.scopeText, deliveryCollectionId === null && styles.scopeTextActive]}>All saved quotes</Text>
+                <Text style={styles.scopeCount}>{quotes.length}</Text>
+              </Pressable>
+              {collections.map((col) => {
+                const selected = deliveryCollectionId === col.id;
+                // Counted against the bank, not `col.quoteIds.length`: a
+                // collection can still reference quotes that have been deleted.
+                const size = quotes.filter((q) => col.quoteIds.includes(q.id)).length;
+                return (
+                  <Pressable
+                    key={col.id}
+                    accessibilityRole="button"
+                    accessibilityState={{ selected }}
+                    onPress={() => void updateDeliveryCollection(col.id)}
+                    style={[styles.scopeRow, selected && styles.scopeRowActive]}
+                  >
+                    <Ionicons name={selected ? 'radio-button-on' : 'radio-button-off'} size={16} color={selected ? colors.caramel : colors.taupe} />
+                    <Text style={[styles.scopeText, selected && styles.scopeTextActive]} numberOfLines={1}>{col.name}</Text>
+                    <Text style={styles.scopeCount}>{size}</Text>
+                  </Pressable>
+                );
+              })}
+            </View>
+            {collections.length === 0 ? (
+              <Text style={styles.copy}>Create a collection in your quote bank to narrow what gets delivered.</Text>
+            ) : scopeFellBack ? (
+              // The fallback is deliberate but silent otherwise: someone whose
+              // collection is empty would see a quote from outside it with no
+              // explanation and assume the setting was ignored.
+              <Text style={styles.scopeWarning}>
+                That collection has no saved quotes right now, so quotes are being delivered from your whole bank until you add some.
+              </Text>
+            ) : (
+              <Text style={styles.copy}>
+                {deliveryCollectionId === null
+                  ? 'Every quote in your bank is in the rotation.'
+                  : `Delivering from ${deliveryPool.length} ${deliveryPool.length === 1 ? 'quote' : 'quotes'} in this collection.`}
+              </Text>
+            )}
+
             <View style={styles.yesNoRow}>
               <Text style={styles.label}>Play a sound on notification?</Text>
               <View style={styles.toggle}>
@@ -268,7 +331,7 @@ export default function SettingsScreen(): ReactElement {
             {extraEnabled ? (
               <>
                 <Text style={[styles.label, { marginTop: 16 }]}>How many additional quotes?</Text>
-                <View style={styles.countRow}>
+                <View testID="extra-count" style={styles.countRow}>
                   {[1, 2, 3, 4, 5].map((n) => (
                     <Pressable key={n} onPress={() => { setExtraCount(n); markDirty(); }} style={[styles.countBtn, extraCount === n && styles.countBtnActive]}>
                       <Text style={[styles.countText, extraCount === n && styles.countTextActive]}>{n}</Text>
@@ -276,12 +339,61 @@ export default function SettingsScreen(): ReactElement {
                   ))}
                 </View>
                 <Text style={[styles.label, { marginTop: 16 }]}>Notification times</Text>
-                {extraTimes.slice(0, extraCount).map((t, i) => (
-                  <View key={i} style={styles.extraSlot}>
-                    <Text style={styles.slotLabel}>Quote {i + 2}</Text>
-                    <TimePicker compact colors={colors} scale={scale} value={t} label={`Extra quote ${i + 1}`} onChange={(v) => { setExtraTimes((prev) => prev.map((ts, idx) => idx === i ? v : ts)); markDirty(); }} />
-                  </View>
-                ))}
+                {extraTimes.slice(0, extraCount).map((t, i) => {
+                  const slotCollection = extraCollections[i] ?? null;
+                  // Reported against the bank rather than the collection's own
+                  // membership, and only once saved: the pools come from the
+                  // provider, so an unsaved pick has no pool behind it yet.
+                  const slotSize = extraPools[i]?.length;
+                  const saved = additionalQuotes.collectionIds[i] ?? null;
+                  return (
+                    <View key={i} style={styles.extraSlot}>
+                      <Text style={styles.slotLabel}>Quote {i + 2}</Text>
+                      <TimePicker compact colors={colors} scale={scale} value={t} label={`Extra quote ${i + 1}`} onChange={(v) => { setExtraTimes((prev) => prev.map((ts, idx) => idx === i ? v : ts)); markDirty(); }} />
+                      {collections.length ? (
+                        <>
+                          <Text style={styles.slotScopeLabel}>Draw from</Text>
+                          <ScrollView horizontal showsHorizontalScrollIndicator={false} testID={`slot-collections-${i}`} style={styles.slotScope} contentContainerStyle={styles.slotScopeContent}>
+                            {/* "Same as daily" rather than "All saved quotes": the
+                                slot follows the delivery scope above, so it stays
+                                correct if that is narrowed later. */}
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityState={{ selected: slotCollection === null }}
+                              accessibilityLabel={`Quote ${i + 2} from: Same as daily`}
+                              onPress={() => setSlotCollection(i, null)}
+                              style={[styles.slotChip, slotCollection === null && styles.slotChipActive]}
+                            >
+                              <Text style={[styles.slotChipText, slotCollection === null && styles.slotChipTextActive]}>Same as daily</Text>
+                            </Pressable>
+                            {collections.map((col) => {
+                              const active = slotCollection === col.id;
+                              return (
+                                <Pressable
+                                  key={col.id}
+                                  accessibilityRole="button"
+                                  accessibilityState={{ selected: active }}
+                                  accessibilityLabel={`Quote ${i + 2} from: ${col.name}`}
+                                  onPress={() => setSlotCollection(i, col.id)}
+                                  style={[styles.slotChip, active && styles.slotChipActive]}
+                                >
+                                  <Text style={[styles.slotChipText, active && styles.slotChipTextActive]}>{col.name}</Text>
+                                </Pressable>
+                              );
+                            })}
+                          </ScrollView>
+                          {slotCollection !== null && slotCollection === saved && slotSize !== undefined ? (
+                            <Text style={styles.slotScopeCopy}>
+                              {quotes.filter((q) => collections.find((c) => c.id === slotCollection)?.quoteIds.includes(q.id)).length
+                                ? `Drawing from ${slotSize} ${slotSize === 1 ? 'quote' : 'quotes'}.`
+                                : 'That collection has no saved quotes right now, so this one falls back to your whole bank.'}
+                            </Text>
+                          ) : null}
+                        </>
+                      ) : null}
+                    </View>
+                  );
+                })}
               </>
             ) : null}
             <Pressable accessibilityRole="button" onPress={() => void saveExtra()} style={({ pressed }) => [styles.button, { marginTop: 16, opacity: pressed ? 0.75 : 1 }]}>
@@ -332,7 +444,7 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     cardBody: { paddingHorizontal: 16, paddingBottom: 16 },
     cardTitle: { fontSize: scale(18), fontWeight: '800', color: colors.chocolate, flex: 1 },
     copy: { marginTop: 6, fontSize: scale(13), color: colors.mutedChocolate, lineHeight: scale(19) },
-    modeRow: { flexDirection: 'row', gap: 10, marginTop: 14 },
+    modeRow: { flexDirection: 'row', gap: 10, marginTop: 8 },
     modeBtn: { flex: 1, paddingVertical: 7, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.softCream, alignItems: 'center' },
     modeBtnActive: { backgroundColor: colors.chocolate, borderColor: colors.chocolate },
     modeBtnText: { fontSize: scale(12), fontWeight: '700', color: colors.mutedChocolate },
@@ -362,6 +474,13 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     toggleActive: { backgroundColor: colors.chocolate },
     toggleText: { fontSize: scale(13), fontWeight: '700', color: colors.mutedChocolate },
     toggleTextActive: { color: colors.white },
+    scopeList: { marginTop: 10, gap: 6 },
+    scopeRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.softCream },
+    scopeRowActive: { borderColor: colors.caramel },
+    scopeText: { flex: 1, fontSize: scale(13), fontWeight: '700', color: colors.mutedChocolate },
+    scopeTextActive: { color: colors.chocolate },
+    scopeCount: { fontSize: scale(12), fontWeight: '700', color: colors.taupe },
+    scopeWarning: { marginTop: 8, fontSize: scale(12), lineHeight: scale(18), color: colors.burntCaramel, fontWeight: '600' },
     countRow: { flexDirection: 'row', gap: 7, marginTop: 10 },
     countBtn: { width: 38, height: 38, borderRadius: 7, backgroundColor: colors.softCream, borderWidth: 1, borderColor: colors.border, alignItems: 'center', justifyContent: 'center' },
     countBtnActive: { backgroundColor: colors.chocolate, borderColor: colors.chocolate },
@@ -369,5 +488,15 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     countTextActive: { color: colors.white },
     extraSlot: { marginTop: 10, backgroundColor: colors.softCream, borderRadius: 9, borderWidth: 1, borderColor: colors.border, padding: 10 },
     slotLabel: { fontSize: scale(11), fontWeight: '700', color: colors.mutedChocolate, textTransform: 'uppercase', letterSpacing: 0.6 },
+    slotScopeLabel: { marginTop: 12, fontSize: scale(11), fontWeight: '700', color: colors.mutedChocolate, textTransform: 'uppercase', letterSpacing: 0.6 },
+    // flexShrink pinned as well as flexGrow: ScrollView's own base style sets
+    // both to 1, and leaving the shrink in place lets a tight card clip the row.
+    slotScope: { flexGrow: 0, flexShrink: 0, marginTop: 7 },
+    slotScopeContent: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingRight: 4 },
+    slotChip: { paddingVertical: 5, paddingHorizontal: 11, borderRadius: 20, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border },
+    slotChipActive: { backgroundColor: colors.caramel, borderColor: colors.caramel },
+    slotChipText: { fontSize: scale(11), fontWeight: '700', color: colors.mutedChocolate },
+    slotChipTextActive: { color: colors.white },
+    slotScopeCopy: { marginTop: 7, fontSize: scale(11), lineHeight: scale(16), color: colors.mutedChocolate },
   });
 }

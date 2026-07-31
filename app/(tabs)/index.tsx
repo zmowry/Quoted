@@ -1,10 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
-import { ActivityIndicator, Alert, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ActivityIndicator, FlatList, Image, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
-import { captureRef } from 'react-native-view-shot';
-import { shareAsync } from 'expo-sharing';
 import { QuoteCard } from '@/src/components/QuoteCard';
 import { CollectionModal } from '@/src/components/CollectionModal';
 import { ComposeQuoteModal } from '@/src/components/ComposeQuoteModal';
@@ -12,6 +10,7 @@ import { customQuoteWith, isCustomQuote, makeCustomQuote } from '@/src/customQuo
 import { quoteWithAttribution } from '@/src/format';
 import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
+import { useQuoteShare } from '@/src/hooks/useQuoteShare';
 import { useTheme } from '@/src/hooks/useTheme';
 import { QUOTE_FONT } from '@/src/theme';
 import type { Colors } from '@/src/theme';
@@ -31,10 +30,12 @@ export default function QuoteBankScreen(): ReactElement {
   const [taggedQuote, setTaggedQuote] = useState<Quote | null>(null);
   const [composing, setComposing] = useState(false);
   const [editing, setEditing] = useState<Quote | null>(null);
-  const [sharing, setSharing] = useState(false);
   const { copied, copy } = useCopyFeedback();
+  // Shares the same branded card as every other quote in the app rather than a
+  // snapshot of the banner, which would have carried the author photo and the
+  // "More from this author" row into the image.
+  const { sharingId, shareQuote } = useQuoteShare();
   const [refreshing, setRefreshing] = useState(false);
-  const bannerRef = useRef<View>(null);
 
   // A tapped notification arrives as ?quote=<id> so the banner can show the quote
   // that actually fired rather than today's default.
@@ -66,6 +67,7 @@ export default function QuoteBankScreen(): ReactElement {
   // falls back to today's rather than rendering blank.
   const focused = focusId ? quotes.find((q) => q.id === focusId) : undefined;
   const displayed = focused ?? quoteOfDay;
+  const sharing = !!displayed && sharingId === displayed.id;
 
   const filteredQuotes = useMemo(() => {
     let result = quotes;
@@ -89,22 +91,11 @@ export default function QuoteBankScreen(): ReactElement {
     return Array.from(seen.values()).sort((a, b) => a.authorName.localeCompare(b.authorName));
   }, [filteredQuotes]);
 
-  const shareQuote = async (): Promise<void> => {
-    if (!bannerRef.current || sharing) return;
-    try {
-      setSharing(true);
-      const uri = await captureRef(bannerRef, { format: 'png', quality: 1 });
-      await shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Share your quote' });
-    } catch {
-      Alert.alert('Could not share', 'Something went wrong preparing the quote image. Please try again.');
-    } finally { setSharing(false); }
-  };
-
   if (loading) return <View style={styles.center}><ActivityIndicator /></View>;
 
   const banner = (
     <View>
-      <View ref={bannerRef} style={styles.banner} collapsable={false}>
+      <View style={styles.banner}>
         {/* The kicker doubles as the explanation for why this is not today's quote. */}
         <Text style={styles.kicker}>{focused ? 'FROM YOUR NOTIFICATION' : 'QUOTE OF THE DAY'}</Text>
         <Text style={styles.bannerQuote}>{displayed ? `\u201C${displayed.text}\u201D` : 'No quotes saved!'}</Text>
@@ -121,7 +112,7 @@ export default function QuoteBankScreen(): ReactElement {
       </View>
       {displayed ? (
         <View style={styles.bannerActions}>
-          <Pressable accessibilityRole="button" onPress={() => void shareQuote()} style={styles.bannerActionBtn} disabled={sharing}>
+          <Pressable accessibilityRole="button" onPress={() => shareQuote(displayed)} style={styles.bannerActionBtn} disabled={sharing}>
             <Ionicons name="share-outline" size={13} color={colors.mutedChocolate} />
             <Text style={styles.shareText}>{sharing ? 'Preparing...' : 'Share quote'}</Text>
           </Pressable>
@@ -189,14 +180,15 @@ export default function QuoteBankScreen(): ReactElement {
           toolbar for the chip row rather than a separate section. */}
       <View style={styles.chipsToolsRow}>
         {collectionChips}
+        {/* Icon-only: the labels are what forced the chip row to give up its
+            width. The meaning survives for screen readers in the
+            accessibilityLabel, which is also what the tests press by. */}
         <View style={styles.toolRow}>
           <Pressable accessibilityRole="button" accessibilityLabel="Write your own quote" onPress={() => setComposing(true)} style={styles.toolBtn}>
-            <Ionicons name="create-outline" size={13} color={colors.mutedChocolate} />
-            <Text style={styles.toolBtnText}>Write your own</Text>
+            <Ionicons name="create-outline" size={16} color={colors.mutedChocolate} />
           </Pressable>
           <Pressable accessibilityRole="button" accessibilityLabel="Quote history" onPress={() => router.push('/history')} style={styles.toolBtn}>
-            <Ionicons name="time-outline" size={13} color={colors.mutedChocolate} />
-            <Text style={styles.toolBtnText}>History</Text>
+            <Ionicons name="time-outline" size={16} color={colors.mutedChocolate} />
           </Pressable>
         </View>
       </View>
@@ -335,8 +327,9 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     search: { backgroundColor: colors.white, borderColor: colors.border, borderWidth: 1, borderRadius: 10, paddingVertical: 6, paddingHorizontal: 10, marginBottom: 10, fontSize: scale(13), color: colors.chocolate },
     chipsToolsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
     toolRow: { flexDirection: 'row', gap: 8, marginLeft: 8 },
-    toolBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 11 },
-    toolBtnText: { fontSize: scale(12), fontWeight: '700', color: colors.mutedChocolate },
+    // Square rather than the chips' pill shape, so the pair reads as controls
+    // rather than as two more collections on the end of the row.
+    toolBtn: { alignItems: 'center', justifyContent: 'center', width: 32, height: 32, backgroundColor: colors.white, borderWidth: 1, borderColor: colors.border, borderRadius: 8 },
     toggle: { flexDirection: 'row', backgroundColor: colors.border, borderRadius: 8, padding: 2, gap: 2 },
     toggleBtn: { padding: 6, borderRadius: 6 },
     toggleActive: { backgroundColor: colors.chocolate },

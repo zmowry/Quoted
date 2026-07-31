@@ -27,7 +27,11 @@ interface ThemeContextValue {
 const ThemeContext = createContext<ThemeContextValue | undefined>(undefined);
 
 export function ThemeProvider({ children }: PropsWithChildren): ReactElement {
-  const [mode, setModeState] = useState<ThemeMode>('system');
+  // Light rather than 'system'. The palette this app is built around is a warm
+  // cream-and-chocolate one, and someone whose phone happens to be in dark mode
+  // should meet that on first launch rather than the inverted version of it.
+  // 'system' stays on offer in settings, it just is not what you land on.
+  const [mode, setModeState] = useState<ThemeMode>('light');
   const [textSize, setTextSizeState] = useState<TextSize>('medium');
   // Re-renders on its own when the OS appearance flips, so 'system' tracks live.
   const systemScheme = useColorScheme();

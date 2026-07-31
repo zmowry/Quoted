@@ -63,18 +63,23 @@ describe('Display settings', () => {
     expect(screen.queryByText('Large')).toBeNull();
   });
 
-  it('follows the device appearance until the user picks a mode', async () => {
+  // Appearance and text size share one card, so every test below expands the
+  // same 'Display' header rather than one per setting.
+  it('starts on the light palette rather than following the device', async () => {
+    // 'system' would hand a dark-mode phone the inverted version of a deliberately
+    // warm palette on first launch. It stays on offer, it is just not the default.
     await openSettings();
-    expandCard('Display mode');
-    expect(screen.getByText(/Following your device appearance/)).toBeTruthy();
+    expandCard('Display');
+    expect(screen.queryByText(/Following your device appearance/)).toBeNull();
+    expect(await AsyncStorage.getItem('@quote-bank/theme')).toBeNull();
   });
 
   it('persists the system option', async () => {
     await openSettings();
-    expandCard('Display mode');
+    expandCard('Display');
     fireEvent.press(screen.getByText('Dark'));
     await waitFor(async () => expect(await AsyncStorage.getItem('@quote-bank/theme')).toBe('dark'));
-    // Returning to System must be storable, not just the initial state.
+    // Returning to System must be storable, not just an initial state.
     fireEvent.press(screen.getByText('System'));
     await waitFor(async () => expect(await AsyncStorage.getItem('@quote-bank/theme')).toBe('system'));
     expect(screen.getByText(/Following your device appearance/)).toBeTruthy();
@@ -82,7 +87,7 @@ describe('Display settings', () => {
 
   it('persists the selected display mode', async () => {
     await openSettings();
-    expandCard('Display mode');
+    expandCard('Display');
     fireEvent.press(screen.getByText('Dark'));
     await waitFor(async () => expect(await AsyncStorage.getItem('@quote-bank/theme')).toBe('dark'));
 
@@ -92,16 +97,25 @@ describe('Display settings', () => {
 
   it('persists the selected text size', async () => {
     await openSettings();
-    expandCard('Text size');
+    expandCard('Display');
     fireEvent.press(screen.getByText('Large'));
     await waitFor(async () => expect(await AsyncStorage.getItem('@quote-bank/text-size')).toBe('large'));
+  });
+
+  it('offers both settings under the one header', async () => {
+    await openSettings();
+    expandCard('Display');
+    expect(screen.getByText('Display mode')).toBeTruthy();
+    expect(screen.getByText('Text size')).toBeTruthy();
+    expect(screen.getByText('System')).toBeTruthy();
+    expect(screen.getByText('Large')).toBeTruthy();
   });
 
   it('restores a stored theme and text size on mount', async () => {
     await AsyncStorage.setItem('@quote-bank/theme', 'dark');
     await AsyncStorage.setItem('@quote-bank/text-size', 'small');
     await openSettings();
-    expandCard('Text size');
+    expandCard('Display');
     // A restored preference is reflected without the user touching anything.
     await waitFor(async () => expect(await AsyncStorage.getItem('@quote-bank/theme')).toBe('dark'));
     expect(screen.getByText('Small')).toBeTruthy();

@@ -31,6 +31,28 @@ describe('quoteStorage', () => {
     expect(await quoteStorage.getQuotes()).toEqual([quote]);
   });
 
+  describe('additional quotes settings', () => {
+    // Settings saved by a build without per-slot collections have no
+    // `collectionIds` at all. Reading one back has to yield an entry for every
+    // slot the UI can offer, since the pool builder indexes it by slot.
+    it('fills in per-slot collections missing from older stored settings', async () => {
+      await AsyncStorage.setItem(STORAGE_KEYS.extra, JSON.stringify({ enabled: true, count: 2, times: [{ hour: 12, minute: 0 }] }));
+      const stored = await quoteStorage.getAdditionalQuotes();
+      expect(stored.collectionIds).toEqual([null, null, null, null, null]);
+      expect(stored).toMatchObject({ enabled: true, count: 2 });
+    });
+
+    it('pads a short list rather than leaving later slots undefined', async () => {
+      await AsyncStorage.setItem(STORAGE_KEYS.extra, JSON.stringify({ enabled: true, count: 3, times: [], collectionIds: ['c1'] }));
+      await expect(quoteStorage.getAdditionalQuotes()).resolves.toMatchObject({ collectionIds: ['c1', null, null, null, null] });
+    });
+
+    it('round-trips a saved per-slot collection', async () => {
+      await quoteStorage.setAdditionalQuotes({ enabled: true, count: 1, times: [{ hour: 12, minute: 0 }], collectionIds: [null, 'c2', null, null, null] });
+      await expect(quoteStorage.getAdditionalQuotes()).resolves.toMatchObject({ collectionIds: [null, 'c2', null, null, null] });
+    });
+  });
+
   describe('corrupted storage', () => {
     it('falls back to the default instead of throwing when a value is not valid JSON', async () => {
       // A bare JSON.parse would throw here, and the mount effect that awaits

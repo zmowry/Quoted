@@ -4,10 +4,12 @@ import { useLocalSearchParams } from 'expo-router';
 import { Image, ScrollView, StyleSheet, Text, Pressable, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { authorById } from '@/src/data/authorsData';
+import { themeLabel } from '@/src/data/themes';
 import { authorPhotos } from '@/src/data/authorPhotos';
 import { quoteWithAttribution } from '@/src/format';
 import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
+import { useQuoteShare } from '@/src/hooks/useQuoteShare';
 import { useTheme } from '@/src/hooks/useTheme';
 import { QUOTE_FONT } from '@/src/theme';
 import type { Colors } from '@/src/theme';
@@ -19,6 +21,22 @@ function CopyButton({ quote }: { quote: Pick<Quote, 'text' | 'authorName'> }): R
   return (
     <Pressable onPress={() => void copy(quoteWithAttribution(quote))} accessibilityLabel="Copy quote" style={{ padding: 4 }}>
       <Ionicons name={copied ? 'checkmark' : 'copy-outline'} size={15} color={copied ? colors.caramel : colors.taupe} />
+    </Pressable>
+  );
+}
+
+/**
+ * Labelled by quote text rather than a bare "Share quote", matching `QuoteCard`:
+ * a page renders every quote an author has, so a fixed label would be ambiguous
+ * a dozen times over.
+ */
+function ShareButton({ quote }: { quote: Quote }): ReactElement {
+  const { colors } = useTheme();
+  const { sharingId, shareQuote } = useQuoteShare();
+  const sharing = sharingId === quote.id;
+  return (
+    <Pressable onPress={() => shareQuote(quote)} disabled={sharing} accessibilityLabel={`Share ${quote.text}`} style={{ padding: 4 }}>
+      <Ionicons name="share-outline" size={15} color={sharing ? colors.caramel : colors.taupe} />
     </Pressable>
   );
 }
@@ -47,6 +65,15 @@ export function AuthorDetail({ authorId }: { authorId: string }): ReactElement {
             : <View style={[styles.photo, styles.photoPlaceholder]}><Text style={styles.photoInitial}>{author.name.charAt(0)}</Text></View>}
         </View>
       </View>
+      {/* Read-only here: the chips on the authors list are the filter, and making
+          these tappable would mean navigating backwards out of a detail screen. */}
+      <View style={styles.themeRow}>
+        {author.themes.map((theme) => (
+          <View key={theme} style={styles.themeChip}>
+            <Text style={styles.themeChipText}>{themeLabel(theme)}</Text>
+          </View>
+        ))}
+      </View>
       <View style={styles.filterRow}>
         <Pressable accessibilityRole="button" onPress={() => setFilter('all')} style={[styles.filterTab, filter === 'all' && styles.filterTabActive]}>
           <Text style={[styles.filterTabText, filter === 'all' && styles.filterTabTextActive]}>All Quotes</Text>
@@ -65,7 +92,13 @@ export function AuthorDetail({ authorId }: { authorId: string }): ReactElement {
           <View key={quote.id} style={styles.quoteCard}>
             <View style={styles.quoteRow}>
               <Text style={[styles.quote, { flex: 1 }]}>"{quote.text}"</Text>
-              <CopyButton quote={quote} />
+              {/* Side by side rather than stacked under the text: stacking tied
+                  Share's position to how many lines the quote wrapped to, so a
+                  two-line quote visibly dragged it away from Copy. */}
+              <View style={styles.quoteActions}>
+                <CopyButton quote={quote} />
+                <ShareButton quote={quote} />
+              </View>
             </View>
             <Pressable accessibilityRole="button" accessibilityLabel={saved ? `Remove ${quote.text}` : `Save ${quote.text}`} style={[styles.save, saved && styles.remove]} onPress={() => void (saved ? removeQuote(quote.id) : saveQuote(quote))}>
               <Text style={styles.saveText}>{saved ? 'Remove from My Bank' : '+ Save'}</Text>
@@ -93,6 +126,9 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     photo: { width: 84, height: 84, borderRadius: 42 },
     photoPlaceholder: { backgroundColor: colors.taupe, alignItems: 'center', justifyContent: 'center' },
     photoInitial: { color: colors.white, fontSize: scale(28), fontWeight: '800' },
+    themeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 16 },
+    themeChip: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 20, backgroundColor: colors.softCream, borderWidth: 1, borderColor: colors.border },
+    themeChipText: { fontSize: scale(11), fontWeight: '700', color: colors.mutedChocolate },
     filterRow: { flexDirection: 'row', backgroundColor: colors.white, borderRadius: 10, borderWidth: 1, borderColor: colors.border, padding: 3, marginBottom: 14 },
     filterTab: { flex: 1, paddingVertical: 8, alignItems: 'center', borderRadius: 7 },
     filterTabActive: { backgroundColor: colors.caramel },
@@ -101,9 +137,10 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     emptyText: { fontSize: scale(14), color: colors.mutedChocolate, fontStyle: 'italic', textAlign: 'center', marginTop: 20 },
     quoteCard: { backgroundColor: colors.white, borderRadius: 12, borderColor: colors.border, borderWidth: 1, padding: 12, marginBottom: 10 },
     quoteRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
+    quoteActions: { flexDirection: 'row', alignItems: 'center', gap: 2 },
     quote: { fontFamily: QUOTE_FONT, fontSize: scale(14), lineHeight: scale(20), color: colors.chocolate },
-    save: { alignSelf: 'flex-start', marginTop: 10, backgroundColor: colors.caramel, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 7 },
+    save: { alignSelf: 'flex-start', marginTop: 8, backgroundColor: colors.caramel, paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
     remove: { backgroundColor: colors.burntCaramel },
-    saveText: { color: colors.white, fontWeight: '800', fontSize: scale(11) },
+    saveText: { color: colors.white, fontWeight: '800', fontSize: scale(10) },
   });
 }
