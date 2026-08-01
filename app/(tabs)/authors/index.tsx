@@ -10,7 +10,7 @@ import type { ThemeId } from '@/src/data/themes';
 import { authorPhotos } from '@/src/data/authorPhotos';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
-import { QUOTE_FONT } from '@/src/theme';
+import { QUOTE_FONT, measure } from '@/src/theme';
 import type { Colors } from '@/src/theme';
 import type { Author, Quote } from '@/src/types';
 
@@ -102,6 +102,9 @@ export default function AuthorsScreen(): ReactElement {
   }, [authors, quoteMatches]);
 
   return (
+    // Two views rather than one: the outer paints the background edge to edge,
+    // the inner holds the content to a readable measure on iPad.
+    <View style={styles.screen}>
     <View style={styles.page}>
       <TextInput
         accessibilityLabel="Search authors"
@@ -207,12 +210,14 @@ export default function AuthorsScreen(): ReactElement {
         }}
       />
     </View>
+    </View>
   );
 }
 
 function makeStyles(colors: Colors, scale: (n: number) => number) {
   return StyleSheet.create({
-    page: { flex: 1, padding: 16, backgroundColor: colors.cream },
+    screen: { flex: 1, backgroundColor: colors.cream },
+    page: { flex: 1, padding: 16, ...measure },
     search: { backgroundColor: colors.white, borderColor: colors.border, borderWidth: 1, borderRadius: 12, padding: 14, marginBottom: 10, fontSize: scale(16), color: colors.chocolate },
     themeHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 7 },
     clearThemes: { paddingVertical: 2, paddingHorizontal: 6 },

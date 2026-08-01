@@ -1,7 +1,9 @@
 jest.mock('@/src/services/storage', () => ({ quoteStorage: { getQueue: jest.fn(), setQueue: jest.fn(), getDailyAssignments: jest.fn(), setDailyAssignments: jest.fn() } }));
 import { dateKey, deliveryPool, deliveryScopeActive, deliveryStats } from '@/src/services/queueManager';
 import { quoteStorage } from '@/src/services/storage';
-import type { Collection, Quote } from '@/src/types';
+import { ALL_QUOTES } from '@/src/types';
+import type { Collection, DeliveryScope, Quote } from '@/src/types';
+import type { ThemeId } from '@/src/data/themes';
 
 const quote = (id: string, authorName = 'X'): Quote => ({ id, text: id.toUpperCase(), authorId: authorName.toLowerCase(), authorName });
 const quotes: Quote[] = [quote('a'), quote('b'), quote('c', 'Y')];
@@ -20,39 +22,77 @@ beforeEach(() => {
   (quoteStorage.getDailyAssignments as jest.Mock).mockResolvedValue({});
 });
 
+const inCollection = (id: string): DeliveryScope => ({ kind: 'collection', id });
+const withTheme = (id: ThemeId): DeliveryScope => ({ kind: 'theme', id });
+
 describe('deliveryPool', () => {
-  it('returns the whole bank when no collection is chosen', () => {
-    expect(deliveryPool(quotes, [collection('c1', ['a'])], null)).toEqual(quotes);
+  it('returns the whole bank when nothing is chosen', () => {
+    expect(deliveryPool(quotes, [collection('c1', ['a'])], ALL_QUOTES)).toEqual(quotes);
   });
 
   it('narrows to the chosen collection', () => {
-    expect(deliveryPool(quotes, [collection('c1', ['a', 'c'])], 'c1')).toEqual([quotes[0], quotes[2]]);
+    expect(deliveryPool(quotes, [collection('c1', ['a', 'c'])], inCollection('c1'))).toEqual([quotes[0], quotes[2]]);
   });
 
   it('ignores ids the collection lists but the bank no longer holds', () => {
-    expect(deliveryPool(quotes, [collection('c1', ['a', 'deleted'])], 'c1')).toEqual([quotes[0]]);
+    expect(deliveryPool(quotes, [collection('c1', ['a', 'deleted'])], inCollection('c1'))).toEqual([quotes[0]]);
   });
 
   // Both fallbacks exist so a forgotten collection cannot silently stop delivery.
   it('falls back to the whole bank when the chosen collection is gone', () => {
-    expect(deliveryPool(quotes, [], 'missing')).toEqual(quotes);
+    expect(deliveryPool(quotes, [], inCollection('missing'))).toEqual(quotes);
   });
 
   it('falls back to the whole bank when the chosen collection holds nothing saved', () => {
-    expect(deliveryPool(quotes, [collection('c1', [])], 'c1')).toEqual(quotes);
-    expect(deliveryPool(quotes, [collection('c1', ['deleted'])], 'c1')).toEqual(quotes);
+    expect(deliveryPool(quotes, [collection('c1', [])], inCollection('c1'))).toEqual(quotes);
+    expect(deliveryPool(quotes, [collection('c1', ['deleted'])], inCollection('c1'))).toEqual(quotes);
+  });
+});
+
+/**
+ * Themed quotes need real author ids, since a built-in quote inherits its
+ * author's tags. Seneca carries stoicism; Mark Twain carries humor and neither
+ * carries the other's.
+ */
+describe('deliveryPool scoped to a theme', () => {
+  const stoic: Quote = { id: 's', text: 'S', authorId: 'seneca', authorName: 'Seneca' };
+  const funny: Quote = { id: 'f', text: 'F', authorId: 'twain', authorName: 'Mark Twain' };
+  const mine: Quote = { id: 'm', text: 'M', authorId: 'custom:me', authorName: 'Me', themes: ['stoicism'] };
+  const bank = [stoic, funny, mine];
+
+  it('narrows to quotes carrying the theme', () => {
+    expect(deliveryPool(bank, [], withTheme('stoicism'))).toEqual([stoic, mine]);
+    expect(deliveryPool(bank, [], withTheme('humor'))).toEqual([funny]);
+  });
+
+  it('includes a quote the user tagged themselves', () => {
+    // The case that does not work through the author table at all: `custom:me`
+    // has no author record, so the quote's own themes are all it has.
+    expect(deliveryPool([funny, mine], [], withTheme('stoicism'))).toEqual([mine]);
+  });
+
+  it('falls back to the whole bank when nothing carries the theme', () => {
+    // Same reasoning as the collection fallback: delivering something from the
+    // wider bank beats delivering nothing every morning.
+    expect(deliveryPool(bank, [], withTheme('justice'))).toEqual(bank);
   });
 });
 
 describe('deliveryScopeActive', () => {
-  it('is false with no collection chosen, and true for one holding saved quotes', () => {
-    expect(deliveryScopeActive(quotes, [collection('c1', ['a'])], null)).toBe(false);
-    expect(deliveryScopeActive(quotes, [collection('c1', ['a'])], 'c1')).toBe(true);
+  it('is false with nothing chosen, and true for a collection holding saved quotes', () => {
+    expect(deliveryScopeActive(quotes, [collection('c1', ['a'])], ALL_QUOTES)).toBe(false);
+    expect(deliveryScopeActive(quotes, [collection('c1', ['a'])], inCollection('c1'))).toBe(true);
   });
 
   it('is false exactly when the pool has fallen back', () => {
-    expect(deliveryScopeActive(quotes, [collection('c1', [])], 'c1')).toBe(false);
-    expect(deliveryScopeActive(quotes, [], 'missing')).toBe(false);
+    expect(deliveryScopeActive(quotes, [collection('c1', [])], inCollection('c1'))).toBe(false);
+    expect(deliveryScopeActive(quotes, [], inCollection('missing'))).toBe(false);
+  });
+
+  it('tracks a theme scope the same way', () => {
+    const stoic: Quote = { id: 's', text: 'S', authorId: 'seneca', authorName: 'Seneca' };
+    expect(deliveryScopeActive([stoic], [], withTheme('stoicism'))).toBe(true);
+    expect(deliveryScopeActive([stoic], [], withTheme('justice'))).toBe(false);
   });
 });
 
@@ -127,7 +167,7 @@ describe('deliveryStats', () => {
 
   it('measures cycle progress against the delivery pool, not the whole bank', async () => {
     (quoteStorage.getQueue as jest.Mock).mockResolvedValue({ shownIds: ['a', 'c'] });
-    const pool = deliveryPool(quotes, [collection('c1', ['a', 'b'])], 'c1');
+    const pool = deliveryPool(quotes, [collection('c1', ['a', 'b'])], inCollection('c1'));
     // 'c' is shown but outside the pool, so it counts toward neither figure.
     await expect(deliveryStats(quotes, pool, { now })).resolves.toMatchObject({ cycle: { shown: 1, total: 2 } });
   });

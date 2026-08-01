@@ -8,13 +8,15 @@ An Expo Router + TypeScript iOS app for collecting quotes from famous authors, s
 - Every author is tagged with 3-8 themes (stoicism, resilience, humor, ...) from a fixed vocabulary; filter the author list by theme, or search for one by name
 - Quote of the Day banner that cycles through your saved quotes without repeating until all have been shown
 - Share any quote as an image — from the banner, the bank, an author page, or your history — or copy it to the clipboard
-- Write your own quotes with your own attribution; they join the same rotation, collections, and notifications as saved ones
+- Write your own quotes with your own attribution and themes; they join the same rotation, collections, and notifications as saved ones
 - Organize saved quotes into custom collections and filter the bank by them
-- Scope delivery to a single collection, so only quotes you have filed there are sent
+- Scope delivery to a single collection or a single theme, so only those quotes are sent
+- Filter your bank by theme as well as by collection, or search it by theme name
 - Quote history showing what has already been delivered, up to 21 days back, with delivery streaks and cycle progress
 - Tapping a notification opens the app on the quote that was delivered
-- Configurable daily notification time, plus optional additional notifications (1-5/day), each with its own time and its own collection to draw from
+- Configurable daily notification time, plus optional additional notifications (1-5/day), each with its own time and its own collection or theme to draw from
 - Light/dark/system appearance and adjustable text size, both persisted, under one Display setting
+- Settings reports how far ahead quotes are queued, and a reminder fires if the run lapses
 
 ## Tech stack
 
@@ -22,7 +24,7 @@ An Expo Router + TypeScript iOS app for collecting quotes from famous authors, s
 - React Native 0.81, React 19
 - TypeScript 5.9 (strict)
 - AsyncStorage for local, on-device persistence (no backend)
-- Jest + React Native Testing Library — 254 tests across 19 suites
+- Jest + React Native Testing Library — 307 tests across 19 suites
 
 ## Project structure
 
@@ -86,12 +88,25 @@ npx eas build --profile preview --platform ios
 
 ## Notes
 
-- `app.json` declares `platforms: ["ios"]`. A `npm run web` script and the
-  `react-native-web` dependency are still present from earlier development, but web is
-  no longer a declared target and isn't covered by the test suite.
+- `app.json` declares `platforms: ["ios"]`, and nothing web-related survives: the
+  `react-native-web`/`react-dom` dependencies, the `npm run web` script, and the web
+  branch of the notification permission check are all gone.
+- iPad is supported (`ios.supportsTablet`). Rather than letting the layout go full-bleed,
+  every screen's content container is held to `CONTENT_MAX_WIDTH` by the shared `measure`
+  style in `src/theme.ts` — a quote set across a 12.9" screen is a line long enough to lose
+  your place in. Backgrounds stay on the scroll view so only the text is inset, which is why
+  the two screens that painted their background on the content container
+  (`authors/index`, `authors/[authorId]`) needed a wrapper.
 - Notification scheduling is best-effort: if permission is denied or the API is
   unavailable, the failure is swallowed so the UI stays usable. Notifications are
   rescheduled whenever the delivery time, quote of the day, or saved quotes change.
+- The rotation is written to the OS in advance and only ever extended when the app is
+  launched, so a user who stops opening it stops receiving quotes — after 14 days with no
+  extras, and sooner once the 60-notification budget is split across extra slots. That used
+  to happen silently and permanently. Now one slot of the budget is reserved for a reminder
+  scheduled on the first uncovered morning ("Your quotes have paused"), and `Daily delivery`
+  reports the runway it is working with. The reminder follows the day the scheduler actually
+  reached, not the horizon it was asked for, so a truncated plan is still covered.
 - All data (saved quotes, collections, and settings) lives in `AsyncStorage` on the
   device — there is no server or account system.
 - **There is no backup or export.** Quotes you write yourself are the only data that
@@ -123,6 +138,22 @@ npx eas build --profile preview --platform ios
 - Appearance defaults to Light rather than System. The palette is a deliberately warm
   cream-and-chocolate one, and a dark-mode phone should not meet the inverted version of it on
   first launch. System remains an option in settings.
-- Themes are tagged per author rather than per quote, so a quote inherits its author's themes
-  and quotes you wrote yourself have none. `src/data/themes.ts` is the closed vocabulary;
-  adding a tag outside it is a type error.
+- Themes are tagged per author rather than per quote, so a built-in quote inherits its
+  author's themes — 500 individually-tagged quotes would be a judgement call each rather
+  than a fact about the writer. Quotes you write yourself are the exception: a `custom:`
+  authorId has no author record to inherit from, so they carry their own tags, set in the
+  compose sheet. `themesForQuote` is the one place that resolves the two, preferring the
+  quote's own. `src/data/themes.ts` is the closed vocabulary; adding a tag outside it is a
+  type error.
+- Theme filters and theme scopes are offered only for themes something in the bank actually
+  carries (`themesInBank`). A chip for a theme nobody has saved could only ever empty the
+  list, or — as a delivery scope — deliver nothing and fall straight back to the whole bank.
+- Delivery scope is a `DeliveryScope` discriminated union (`all` / `collection` / `theme`)
+  rather than the nullable collection id it started as. `deliveryPool` is the single place
+  that resolves one to quotes, so a new variant means teaching one function. The same type
+  drives each extra slot, where `null` still means "follow the daily scope". Two migrations
+  run on read: `@quote-bank/delivery-collection` held a bare collection id, and extra-slot
+  settings held a `collectionIds` array of them; both lift into collection scopes, and the
+  old delivery key is deleted the next time a scope is set.
+- The theme fallback matches the collection one: a scope nothing carries widens back to the
+  whole bank, and settings says so. Silently delivering nothing would be the worse failure.

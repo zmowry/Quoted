@@ -1,3 +1,4 @@
+import { THEMES } from '@/src/data/themes';
 import type { ThemeId } from '@/src/data/themes';
 import type { Author, Quote } from '@/src/types';
 
@@ -604,11 +605,33 @@ export const authorsData: Author[] = [
 export const authorById = (id: string): Author | undefined => authorsData.find((author) => author.id === id);
 
 /**
- * The themes a quote inherits from its author.
+ * The themes a quote carries: its own if it has any, otherwise its author's.
  *
- * Empty for quotes the user wrote: a custom quote's `authorId` is a `custom:`
- * slug with no author record behind it, so there is nothing to inherit. Callers
- * get an empty list rather than undefined so they can filter without a guard.
+ * Quotes the user wrote are the only ones that set `themes` directly — a
+ * `custom:` authorId has no author record to inherit from, so without their own
+ * tags they would be invisible to every theme filter and undeliverable under a
+ * theme scope. Built-in quotes leave the field undefined and inherit, which is
+ * what keeps themes a fact about the writer rather than 500 separate judgement
+ * calls.
+ *
+ * Callers get an empty list rather than undefined so they can filter without a
+ * guard. An explicit empty array is preserved as "tagged with nothing" rather
+ * than falling through to the author, which matters when someone clears the last
+ * theme off a quote they wrote.
  */
-export const themesForQuote = (quote: Pick<Quote, 'authorId'>): ThemeId[] =>
-  authorById(quote.authorId)?.themes ?? [];
+export const themesForQuote = (quote: Pick<Quote, 'authorId' | 'themes'>): ThemeId[] =>
+  quote.themes ?? authorById(quote.authorId)?.themes ?? [];
+
+/**
+ * The themes actually represented in a set of quotes, in vocabulary order.
+ *
+ * Scraped from the quotes rather than generated from `THEMES`, because a chip
+ * for a theme nobody has saved is one that can only ever empty the list — or,
+ * as a delivery scope, deliver nothing and fall back. Vocabulary order rather
+ * than encounter order keeps the row from reshuffling as quotes come and go.
+ */
+export const themesInBank = (quotes: Pick<Quote, 'authorId' | 'themes'>[]): ThemeId[] => {
+  const present = new Set<ThemeId>();
+  for (const quote of quotes) for (const theme of themesForQuote(quote)) present.add(theme);
+  return THEMES.map(({ id }) => id).filter((id) => present.has(id));
+};

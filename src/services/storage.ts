@@ -1,5 +1,24 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { AdditionalQuotesSettings, Collection, DailyAssignments, NotificationTime, QueueState, Quote, QuoteOrder } from '@/src/types';
+import { ALL_QUOTES } from '@/src/types';
+import type { AdditionalQuotesSettings, Collection, DailyAssignments, DeliveryScope, NotificationTime, QueueState, Quote, QuoteOrder } from '@/src/types';
+
+/**
+ * Narrows an unknown value to a `DeliveryScope`, or null if it is not one.
+ *
+ * Every scope on disk was written by some build of this app, but not necessarily
+ * this one: a variant added later, or a value corrupted in place, must land on
+ * the default rather than reach `deliveryPool` as a scope it cannot resolve and
+ * silently deliver nothing.
+ */
+const scopeOrNull = (value: unknown): DeliveryScope | null => {
+  if (!value || typeof value !== 'object') return null;
+  const { kind, id } = value as { kind?: unknown; id?: unknown };
+  if (kind === 'all') return ALL_QUOTES;
+  if ((kind === 'collection' || kind === 'theme') && typeof id === 'string' && id) {
+    return { kind, id } as DeliveryScope;
+  }
+  return null;
+};
 
 export const DEFAULT_NOTIFICATION_TIME: NotificationTime = { hour: 9, minute: 0 };
 export const DEFAULT_QUOTE_ORDER: QuoteOrder = 'shuffle';
@@ -10,7 +29,7 @@ export const DEFAULT_EXTRA_QUOTES: AdditionalQuotesSettings = {
   enabled: false,
   count: 2,
   times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 0 }, { hour: 6, minute: 0 }, { hour: 15, minute: 0 }, { hour: 18, minute: 0 }],
-  collectionIds: [null, null, null, null, null],
+  scopes: [null, null, null, null, null],
 };
 const DEFAULT_EXTRA = DEFAULT_EXTRA_QUOTES;
 
@@ -30,7 +49,9 @@ export const STORAGE_KEYS = {
   order: '@quote-bank/quote-order',
   sound: '@quote-bank/sound',
   assignments: '@quote-bank/daily-assignments',
+  /** Superseded by `deliveryScope`; still registered so `clearAll` removes it. */
   deliveryCollection: '@quote-bank/delivery-collection',
+  deliveryScope: '@quote-bank/delivery-scope',
 } as const;
 
 const KEYS = STORAGE_KEYS;
@@ -66,17 +87,26 @@ export const quoteStorage = {
   async getNotificationTime(): Promise<NotificationTime> { return read(KEYS.time, DEFAULT_NOTIFICATION_TIME); },
   async setNotificationTime(time: NotificationTime): Promise<void> { await AsyncStorage.setItem(KEYS.time, JSON.stringify(time)); },
   /**
-   * Settings written by a build without per-slot collections have no
-   * `collectionIds` at all, so the array is rebuilt to full length on every read
-   * rather than migrated in place. That keeps `collectionIds[i]` safe to index
-   * for any slot the UI can offer, whatever shape landed on disk.
+   * Settings written by an older build have either no per-slot scopes at all or
+   * a `collectionIds` array of bare ids, so the array is rebuilt to full length
+   * on every read rather than migrated in place. That keeps `scopes[i]` safe to
+   * index for any slot the UI can offer, whatever shape landed on disk.
    */
   async getAdditionalQuotes(): Promise<AdditionalQuotesSettings> {
-    const stored = await read(KEYS.extra, DEFAULT_EXTRA);
-    const ids = Array.isArray(stored.collectionIds) ? stored.collectionIds : [];
+    const stored = await read<AdditionalQuotesSettings & { collectionIds?: unknown }>(KEYS.extra, DEFAULT_EXTRA);
+    const scopes = Array.isArray(stored.scopes) ? stored.scopes : [];
+    // A build before themes stored `collectionIds: (string | null)[]`. Those ids
+    // were always collections, so each one lifts straight into a scope.
+    const legacy = Array.isArray(stored.collectionIds) ? stored.collectionIds : [];
+    const { collectionIds: _dropped, ...rest } = stored;
     return {
-      ...stored,
-      collectionIds: Array.from({ length: MAX_EXTRA_QUOTES }, (_, i) => ids[i] ?? null),
+      ...rest,
+      scopes: Array.from({ length: MAX_EXTRA_QUOTES }, (_, i) => {
+        const scope = scopeOrNull(scopes[i]);
+        if (scope) return scope;
+        const id = legacy[i];
+        return typeof id === 'string' ? { kind: 'collection' as const, id } : null;
+      }),
     };
   },
   async setAdditionalQuotes(settings: AdditionalQuotesSettings): Promise<void> { await AsyncStorage.setItem(KEYS.extra, JSON.stringify(settings)); },
@@ -89,16 +119,30 @@ export const quoteStorage = {
   async getDailyAssignments(): Promise<DailyAssignments> { return read(KEYS.assignments, {}); },
   async setDailyAssignments(assignments: DailyAssignments): Promise<void> { await AsyncStorage.setItem(KEYS.assignments, JSON.stringify(assignments)); },
   /**
-   * Which collection the daily rotation draws from; `null` means the whole bank.
+   * What the daily rotation draws from.
    *
-   * Stored as a bare id string rather than JSON, so absence and "all quotes" are
-   * the same thing on disk and an upgrade from a build without this key lands on
-   * the default with no migration.
+   * Falls back to the key this replaced, which held a bare collection id (or
+   * nothing, meaning the whole bank). Reading rather than rewriting on upgrade
+   * keeps the migration in one place and costs one extra `getItem` only until
+   * the user next changes the setting — `setDeliveryScope` clears the old key.
    */
-  async getDeliveryCollection(): Promise<string | null> { return AsyncStorage.getItem(KEYS.deliveryCollection); },
-  async setDeliveryCollection(id: string | null): Promise<void> {
-    if (id === null) await AsyncStorage.removeItem(KEYS.deliveryCollection);
-    else await AsyncStorage.setItem(KEYS.deliveryCollection, id);
+  async getDeliveryScope(): Promise<DeliveryScope> {
+    const raw = await AsyncStorage.getItem(KEYS.deliveryScope);
+    if (raw) {
+      try {
+        const scope = scopeOrNull(JSON.parse(raw));
+        if (scope) return scope;
+      } catch { /* fall through to the legacy key, then to the default */ }
+    }
+    const legacy = await AsyncStorage.getItem(KEYS.deliveryCollection);
+    return legacy ? { kind: 'collection', id: legacy } : ALL_QUOTES;
+  },
+  async setDeliveryScope(scope: DeliveryScope): Promise<void> {
+    await AsyncStorage.setItem(KEYS.deliveryScope, JSON.stringify(scope));
+    // Removed rather than left behind: it is only ever consulted when the new key
+    // is missing or unreadable, and a stale id there would resurrect a scope the
+    // user has since changed.
+    await AsyncStorage.removeItem(KEYS.deliveryCollection);
   },
   async getCollections(): Promise<Collection[]> { return read(KEYS.collections, []); },
   async setCollections(collections: Collection[]): Promise<void> { await AsyncStorage.setItem(KEYS.collections, JSON.stringify(collections)); },

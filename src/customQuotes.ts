@@ -1,3 +1,4 @@
+import type { ThemeId } from '@/src/data/themes';
 import type { Quote } from '@/src/types';
 
 /**
@@ -48,18 +49,30 @@ export const customAuthorId = (attribution: string): string => CUSTOM_AUTHOR_PRE
  * attribution itself rather than just the id is what stops a card displaying
  * `???` while grouped under a bare `custom:`.
  */
-export const customQuoteFields = (text: string, attribution: string): Pick<Quote, 'text' | 'authorId' | 'authorName'> => {
+export const customQuoteFields = (text: string, attribution: string, themes: ThemeId[] = []): Pick<Quote, 'text' | 'authorId' | 'authorName' | 'themes'> => {
   const trimmed = attribution.trim().slice(0, MAX_ATTRIBUTION_LENGTH);
   const authorName = slugAttribution(trimmed) ? trimmed : DEFAULT_ATTRIBUTION;
-  return { text: text.trim().slice(0, MAX_QUOTE_LENGTH), authorName, authorId: customAuthorId(authorName) };
+  return {
+    text: text.trim().slice(0, MAX_QUOTE_LENGTH),
+    authorName,
+    authorId: customAuthorId(authorName),
+    // Omitted entirely when empty rather than stored as `[]`, so an untagged
+    // quote is shaped exactly like one written before themes existed and no
+    // migration is needed to tell the two apart.
+    ...(themes.length ? { themes: [...new Set(themes)] } : {}),
+  };
 };
 
-export const makeCustomQuote = (text: string, attribution: string): Quote =>
-  ({ id: `custom-${uid()}`, ...customQuoteFields(text, attribution) });
+export const makeCustomQuote = (text: string, attribution: string, themes: ThemeId[] = []): Quote =>
+  ({ id: `custom-${uid()}`, ...customQuoteFields(text, attribution, themes) });
 
 /**
  * An edit keeps the original id, so the quote stays attached to its collections
  * and to the days it has already been delivered on.
+ *
+ * Themes are rebuilt from the argument rather than merged into what was stored,
+ * so clearing the last one off a quote actually clears it — `updateQuote`
+ * replaces the whole record, and the key is simply absent again.
  */
-export const customQuoteWith = (id: string, text: string, attribution: string): Quote =>
-  ({ id, ...customQuoteFields(text, attribution) });
+export const customQuoteWith = (id: string, text: string, attribution: string, themes: ThemeId[] = []): Quote =>
+  ({ id, ...customQuoteFields(text, attribution, themes) });

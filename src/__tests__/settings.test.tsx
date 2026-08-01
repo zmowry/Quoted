@@ -3,6 +3,7 @@ import { fireEvent, screen, waitFor } from '@testing-library/react-native';
 import * as Notifications from 'expo-notifications';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { flushPending, lastTriggerDate, renderWithProviders } from '@/src/test-utils';
+import { coverageLabel } from '@/src/format';
 import { STORAGE_KEYS } from '@/src/services/storage';
 import SettingsScreen from '../../app/(tabs)/settings';
 
@@ -205,6 +206,56 @@ describe('Quote order and sound', () => {
     await waitFor(() => expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledWith(
       expect.objectContaining({ content: expect.objectContaining({ sound: false }) }),
     ));
+  });
+});
+
+/**
+ * How far ahead the OS is queued is otherwise invisible, and it is the whole
+ * reason delivery can stop silently: the run is only ever extended on launch.
+ */
+describe('Delivery runway', () => {
+  const seedQuote = () => AsyncStorage.setItem(STORAGE_KEYS.quotes, JSON.stringify([
+    { id: 'q1', text: 'A saved quote', authorId: 'woolf', authorName: 'Virginia Woolf' },
+  ]));
+
+  /** The last day a 14-day horizon covers, counting today as day one. */
+  const lastCoveredDay = (): Date => {
+    const day = new Date();
+    day.setDate(day.getDate() + 13);
+    return day;
+  };
+
+  it('says how far ahead quotes are queued', async () => {
+    await seedQuote();
+    await openSettings();
+    expandCard('Daily delivery');
+    expect(await screen.findByText(new RegExp(`Queued through ${coverageLabel(lastCoveredDay())}`))).toBeTruthy();
+  });
+
+  it('tells the user opening the app is what extends the run', async () => {
+    await seedQuote();
+    await openSettings();
+    expandCard('Daily delivery');
+    expect(await screen.findByText(/Opening the app extends the run/)).toBeTruthy();
+  });
+
+  it('stays hidden when there is nothing to deliver', async () => {
+    // An empty bank has no runway to report, and saying quotes will pause to
+    // someone who has saved none would be answering a question they never asked.
+    await openSettings();
+    expandCard('Daily delivery');
+    await flushPending();
+    expect(screen.queryByTestId('schedule-runway')).toBeNull();
+  });
+
+  it('does not blame the notification budget when the plan fit', async () => {
+    // One quote a day for a fortnight is well inside the budget, so the caveat
+    // about extra quotes shortening the run has no business appearing.
+    await seedQuote();
+    await openSettings();
+    expandCard('Daily delivery');
+    await screen.findByTestId('schedule-runway');
+    expect(screen.queryByText(/iOS caps how many notifications/)).toBeNull();
   });
 });
 

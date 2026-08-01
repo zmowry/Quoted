@@ -4,12 +4,19 @@ import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, Text, Text
 import { MAX_EXTRA_QUOTES } from '@/src/services/storage';
 import { Ionicons } from '@expo/vector-icons';
 import { isCustomQuote } from '@/src/customQuotes';
+import { coverageLabel } from '@/src/format';
+import { themesForQuote, themesInBank } from '@/src/data/authorsData';
+import { themeLabel } from '@/src/data/themes';
+import type { ThemeId } from '@/src/data/themes';
+import { deliveryScopeActive } from '@/src/services/queueManager';
+import { ALL_QUOTES, sameScope } from '@/src/types';
 import { useNotificationPermission } from '@/src/hooks/useNotificationPermission';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
 import type { TextSize } from '@/src/hooks/useTheme';
+import { measure } from '@/src/theme';
 import type { Colors, ThemeMode } from '@/src/theme';
-import type { AdditionalQuotesSettings, NotificationTime, QuoteOrder } from '@/src/types';
+import type { AdditionalQuotesSettings, DeliveryScope, NotificationTime, QuoteOrder } from '@/src/types';
 
 const pad = (value: number): string => value.toString().padStart(2, '0');
 type Meridiem = 'AM' | 'PM';
@@ -50,7 +57,7 @@ function TimePicker({ value, label, onChange, compact = false, colors, scale }: 
 }
 
 export default function SettingsScreen(): ReactElement {
-  const { notificationTime, additionalQuotes, quotes, collections, loading, updateNotificationTime, updateAdditionalQuotes, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled, deliveryCollectionId, updateDeliveryCollection, deliveryPool, extraPools } = useQuoteBank();
+  const { notificationTime, additionalQuotes, quotes, collections, loading, updateNotificationTime, updateAdditionalQuotes, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled, deliveryScope, updateDeliveryScope, deliveryPool, extraPools, scheduleCoverage } = useQuoteBank();
   const { colors, mode, resolvedMode, setMode, textSize, setTextSize, scale } = useTheme();
   const { status: permissionStatus, request: requestPermission, openSystemSettings } = useNotificationPermission();
   // 'unknown' means the check itself failed; stay quiet rather than raise a false alarm.
@@ -70,7 +77,7 @@ export default function SettingsScreen(): ReactElement {
   const [extraEnabled, setExtraEnabled] = useState(additionalQuotes.enabled);
   const [extraCount, setExtraCount] = useState(additionalQuotes.count);
   const [extraTimes, setExtraTimes] = useState<TimeState[]>(additionalQuotes.times.map(fromNT));
-  const [extraCollections, setExtraCollections] = useState<(string | null)[]>(additionalQuotes.collectionIds);
+  const [extraScopes, setExtraScopes] = useState<(DeliveryScope | null)[]>(additionalQuotes.scopes);
   const [extraSaved, setExtraSaved] = useState(false);
 
   // Stored settings arrive asynchronously, so seed the form from them exactly once.
@@ -85,7 +92,7 @@ export default function SettingsScreen(): ReactElement {
     setExtraEnabled(additionalQuotes.enabled);
     setExtraCount(additionalQuotes.count);
     setExtraTimes(additionalQuotes.times.map(fromNT));
-    setExtraCollections(additionalQuotes.collectionIds);
+    setExtraScopes(additionalQuotes.scopes);
   }, [loading, notificationTime, additionalQuotes]);
 
   const markDirty = (): void => setExtraSaved(false);
@@ -98,15 +105,15 @@ export default function SettingsScreen(): ReactElement {
       count: extraCount,
       times: parsed as NotificationTime[],
       // Padded rather than trimmed to the current count, so turning the count
-      // back up restores the collection each slot had before.
-      collectionIds: Array.from({ length: MAX_EXTRA_QUOTES }, (_, i) => extraCollections[i] ?? null),
+      // back up restores the scope each slot had before.
+      scopes: Array.from({ length: MAX_EXTRA_QUOTES }, (_, i) => extraScopes[i] ?? null),
     };
     await updateAdditionalQuotes(newSettings);
     setExtraSaved(true);
   };
 
-  const setSlotCollection = (slot: number, id: string | null): void => {
-    setExtraCollections((prev) => Array.from({ length: MAX_EXTRA_QUOTES }, (_, i) => i === slot ? id : (prev[i] ?? null)));
+  const setSlotScope = (slot: number, scope: DeliveryScope | null): void => {
+    setExtraScopes((prev) => Array.from({ length: MAX_EXTRA_QUOTES }, (_, i) => i === slot ? scope : (prev[i] ?? null)));
     markDirty();
   };
 
@@ -145,10 +152,16 @@ export default function SettingsScreen(): ReactElement {
     );
   };
 
-  // True when a collection is chosen but `deliveryPool` has widened back to the
-  // whole bank, i.e. that collection holds none of the user's saved quotes.
-  const scopeFellBack = deliveryCollectionId !== null
-    && !quotes.filter((q) => collections.find((c) => c.id === deliveryCollectionId)?.quoteIds.includes(q.id)).length;
+  // True when a scope is chosen but `deliveryPool` has widened back to the whole
+  // bank, i.e. it matches none of the user's saved quotes. Asked of the service
+  // rather than recomputed here, so the screen cannot disagree with the pool it
+  // is describing.
+  const scopeFellBack = deliveryScope.kind !== 'all' && !deliveryScopeActive(quotes, collections, deliveryScope);
+
+  // Only themes something in the bank actually carries: a scope matching nothing
+  // would silently fall back to the whole bank the moment it was chosen.
+  const bankThemes = useMemo(() => themesInBank(quotes), [quotes]);
+  const themeSize = (id: ThemeId): number => quotes.filter((q) => themesForQuote(q).includes(id)).length;
 
   const [openDisplay, setOpenDisplay] = useState(false);
   const [openDelivery, setOpenDelivery] = useState(false);
@@ -231,6 +244,22 @@ export default function SettingsScreen(): ReactElement {
             </Pressable>
             {mainSaved ? <Text style={styles.savedMsg}>(Setting saved)</Text> : null}
 
+            {/* The runway is otherwise invisible: quotes are written to the OS in
+                advance and only topped up on launch, so someone who stops opening
+                the app stops receiving quotes with nothing to explain it. */}
+            {scheduleCoverage?.through ? (
+              <View style={styles.runway} testID="schedule-runway">
+                <Ionicons name="calendar-outline" size={14} color={colors.mutedChocolate} />
+                <Text style={styles.runwayText}>
+                  Queued through {coverageLabel(scheduleCoverage.through)}. Opening the app extends
+                  the run; if it lapses, a reminder will tell you quotes have paused.
+                  {scheduleCoverage.truncated
+                    ? ' More quotes per day shortens this — iOS caps how many notifications can wait at once.'
+                    : ''}
+                </Text>
+              </View>
+            ) : null}
+
             <Text style={[styles.label, { marginTop: 18 }]}>Which quote comes next?</Text>
             <View style={styles.modeRow}>
               {orderOptions.map(({ value, label }) => (
@@ -247,50 +276,76 @@ export default function SettingsScreen(): ReactElement {
 
             <Text style={[styles.label, { marginTop: 18 }]}>Which quotes can be delivered?</Text>
             <View style={styles.scopeList}>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityState={{ selected: deliveryCollectionId === null }}
-                onPress={() => void updateDeliveryCollection(null)}
-                style={[styles.scopeRow, deliveryCollectionId === null && styles.scopeRowActive]}
-              >
-                <Ionicons name={deliveryCollectionId === null ? 'radio-button-on' : 'radio-button-off'} size={16} color={deliveryCollectionId === null ? colors.caramel : colors.taupe} />
-                <Text style={[styles.scopeText, deliveryCollectionId === null && styles.scopeTextActive]}>All saved quotes</Text>
-                <Text style={styles.scopeCount}>{quotes.length}</Text>
-              </Pressable>
-              {collections.map((col) => {
-                const selected = deliveryCollectionId === col.id;
+              {[{ scope: ALL_QUOTES, name: 'All saved quotes', size: quotes.length }, ...collections.map((col) => ({
+                scope: { kind: 'collection', id: col.id } as DeliveryScope,
+                name: col.name,
                 // Counted against the bank, not `col.quoteIds.length`: a
                 // collection can still reference quotes that have been deleted.
-                const size = quotes.filter((q) => col.quoteIds.includes(q.id)).length;
+                size: quotes.filter((q) => col.quoteIds.includes(q.id)).length,
+              }))].map(({ scope, name, size }) => {
+                const selected = sameScope(deliveryScope, scope);
                 return (
                   <Pressable
-                    key={col.id}
+                    key={scope.kind === 'all' ? 'all' : scope.id}
                     accessibilityRole="button"
                     accessibilityState={{ selected }}
-                    onPress={() => void updateDeliveryCollection(col.id)}
+                    onPress={() => void updateDeliveryScope(scope)}
                     style={[styles.scopeRow, selected && styles.scopeRowActive]}
                   >
                     <Ionicons name={selected ? 'radio-button-on' : 'radio-button-off'} size={16} color={selected ? colors.caramel : colors.taupe} />
-                    <Text style={[styles.scopeText, selected && styles.scopeTextActive]} numberOfLines={1}>{col.name}</Text>
+                    <Text style={[styles.scopeText, selected && styles.scopeTextActive]} numberOfLines={1}>{name}</Text>
                     <Text style={styles.scopeCount}>{size}</Text>
                   </Pressable>
                 );
               })}
             </View>
-            {collections.length === 0 ? (
-              <Text style={styles.copy}>Create a collection in your quote bank to narrow what gets delivered.</Text>
-            ) : scopeFellBack ? (
+
+            {/* A chip row rather than more radio rows: there are 21 themes in the
+                vocabulary against a handful of collections, and a list that long
+                would bury the sound toggle below it. Selecting either kind still
+                replaces the other — one scope, two ways to name it. */}
+            {bankThemes.length ? (
+              <>
+                <Text style={styles.slotScopeLabel}>Or by theme</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} testID="delivery-theme-chips" style={styles.slotScope} contentContainerStyle={styles.slotScopeContent}>
+                  {bankThemes.map((id) => {
+                    const selected = deliveryScope.kind === 'theme' && deliveryScope.id === id;
+                    return (
+                      <Pressable
+                        key={id}
+                        accessibilityRole="button"
+                        accessibilityState={{ selected }}
+                        accessibilityLabel={`Deliver from theme ${themeLabel(id)}`}
+                        onPress={() => void updateDeliveryScope({ kind: 'theme', id })}
+                        style={[styles.slotChip, selected && styles.slotChipActive]}
+                      >
+                        <Text style={[styles.slotChipText, selected && styles.slotChipTextActive]}>{themeLabel(id)} · {themeSize(id)}</Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </>
+            ) : null}
+
+            {scopeFellBack ? (
               // The fallback is deliberate but silent otherwise: someone whose
-              // collection is empty would see a quote from outside it with no
+              // scope is empty would see a quote from outside it with no
               // explanation and assume the setting was ignored.
               <Text style={styles.scopeWarning}>
-                That collection has no saved quotes right now, so quotes are being delivered from your whole bank until you add some.
+                {deliveryScope.kind === 'theme'
+                  ? 'Nothing in your bank carries that theme right now, so quotes are being delivered from your whole bank until something does.'
+                  : 'That collection has no saved quotes right now, so quotes are being delivered from your whole bank until you add some.'}
+              </Text>
+            ) : deliveryScope.kind === 'all' ? (
+              <Text style={styles.copy}>
+                {collections.length === 0 && bankThemes.length === 0
+                  ? 'Create a collection in your quote bank to narrow what gets delivered.'
+                  : 'Every quote in your bank is in the rotation.'}
               </Text>
             ) : (
               <Text style={styles.copy}>
-                {deliveryCollectionId === null
-                  ? 'Every quote in your bank is in the rotation.'
-                  : `Delivering from ${deliveryPool.length} ${deliveryPool.length === 1 ? 'quote' : 'quotes'} in this collection.`}
+                Delivering from {deliveryPool.length} {deliveryPool.length === 1 ? 'quote' : 'quotes'}
+                {deliveryScope.kind === 'theme' ? ` tagged ${themeLabel(deliveryScope.id)}.` : ' in this collection.'}
               </Text>
             )}
 
@@ -340,53 +395,54 @@ export default function SettingsScreen(): ReactElement {
                 </View>
                 <Text style={[styles.label, { marginTop: 16 }]}>Notification times</Text>
                 {extraTimes.slice(0, extraCount).map((t, i) => {
-                  const slotCollection = extraCollections[i] ?? null;
-                  // Reported against the bank rather than the collection's own
+                  const slotScope = extraScopes[i] ?? null;
+                  // Reported against the bank rather than the scope's own
                   // membership, and only once saved: the pools come from the
                   // provider, so an unsaved pick has no pool behind it yet.
                   const slotSize = extraPools[i]?.length;
-                  const saved = additionalQuotes.collectionIds[i] ?? null;
+                  const saved = additionalQuotes.scopes[i] ?? null;
+                  // "Same as daily" first, then every way to narrow it. Themes
+                  // are offered here too, or narrowing the daily scope to a theme
+                  // would leave the slots unable to say the same thing.
+                  const options: { key: string; label: string; scope: DeliveryScope | null }[] = [
+                    { key: 'same', label: 'Same as daily', scope: null },
+                    ...collections.map((col) => ({ key: `c-${col.id}`, label: col.name, scope: { kind: 'collection', id: col.id } as DeliveryScope })),
+                    ...bankThemes.map((id) => ({ key: `t-${id}`, label: themeLabel(id), scope: { kind: 'theme', id } as DeliveryScope })),
+                  ];
                   return (
                     <View key={i} style={styles.extraSlot}>
                       <Text style={styles.slotLabel}>Quote {i + 2}</Text>
                       <TimePicker compact colors={colors} scale={scale} value={t} label={`Extra quote ${i + 1}`} onChange={(v) => { setExtraTimes((prev) => prev.map((ts, idx) => idx === i ? v : ts)); markDirty(); }} />
-                      {collections.length ? (
+                      {options.length > 1 ? (
                         <>
                           <Text style={styles.slotScopeLabel}>Draw from</Text>
                           <ScrollView horizontal showsHorizontalScrollIndicator={false} testID={`slot-collections-${i}`} style={styles.slotScope} contentContainerStyle={styles.slotScopeContent}>
-                            {/* "Same as daily" rather than "All saved quotes": the
-                                slot follows the delivery scope above, so it stays
-                                correct if that is narrowed later. */}
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityState={{ selected: slotCollection === null }}
-                              accessibilityLabel={`Quote ${i + 2} from: Same as daily`}
-                              onPress={() => setSlotCollection(i, null)}
-                              style={[styles.slotChip, slotCollection === null && styles.slotChipActive]}
-                            >
-                              <Text style={[styles.slotChipText, slotCollection === null && styles.slotChipTextActive]}>Same as daily</Text>
-                            </Pressable>
-                            {collections.map((col) => {
-                              const active = slotCollection === col.id;
+                            {options.map(({ key, label, scope }) => {
+                              // "Same as daily" rather than "All saved quotes": the
+                              // slot follows the delivery scope above, so it stays
+                              // correct if that is narrowed later.
+                              const active = scope === null ? slotScope === null : !!slotScope && sameScope(slotScope, scope);
                               return (
                                 <Pressable
-                                  key={col.id}
+                                  key={key}
                                   accessibilityRole="button"
                                   accessibilityState={{ selected: active }}
-                                  accessibilityLabel={`Quote ${i + 2} from: ${col.name}`}
-                                  onPress={() => setSlotCollection(i, col.id)}
+                                  accessibilityLabel={`Quote ${i + 2} from: ${label}`}
+                                  onPress={() => setSlotScope(i, scope)}
                                   style={[styles.slotChip, active && styles.slotChipActive]}
                                 >
-                                  <Text style={[styles.slotChipText, active && styles.slotChipTextActive]}>{col.name}</Text>
+                                  <Text style={[styles.slotChipText, active && styles.slotChipTextActive]}>{label}</Text>
                                 </Pressable>
                               );
                             })}
                           </ScrollView>
-                          {slotCollection !== null && slotCollection === saved && slotSize !== undefined ? (
+                          {slotScope !== null && saved !== null && sameScope(slotScope, saved) && slotSize !== undefined ? (
                             <Text style={styles.slotScopeCopy}>
-                              {quotes.filter((q) => collections.find((c) => c.id === slotCollection)?.quoteIds.includes(q.id)).length
+                              {deliveryScopeActive(quotes, collections, slotScope)
                                 ? `Drawing from ${slotSize} ${slotSize === 1 ? 'quote' : 'quotes'}.`
-                                : 'That collection has no saved quotes right now, so this one falls back to your whole bank.'}
+                                : slotScope.kind === 'theme'
+                                  ? 'Nothing in your bank carries that theme right now, so this one falls back to your whole bank.'
+                                  : 'That collection has no saved quotes right now, so this one falls back to your whole bank.'}
                             </Text>
                           ) : null}
                         </>
@@ -432,7 +488,7 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
   return StyleSheet.create({
     scroll: { flex: 1, backgroundColor: colors.cream },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cream },
-    page: { padding: 14, paddingBottom: 40, gap: 12 },
+    page: { padding: 14, paddingBottom: 40, gap: 12, ...measure },
     card: { backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border, shadowColor: colors.chocolate, shadowOpacity: 0.07, shadowRadius: 6, elevation: 2 },
     permissionBanner: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: colors.softCream, borderRadius: 14, borderWidth: 1, borderColor: colors.burntCaramel, padding: 14 },
     permissionText: { flex: 1 },
@@ -474,6 +530,8 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     toggleActive: { backgroundColor: colors.chocolate },
     toggleText: { fontSize: scale(13), fontWeight: '700', color: colors.mutedChocolate },
     toggleTextActive: { color: colors.white },
+    runway: { flexDirection: 'row', alignItems: 'flex-start', gap: 7, marginTop: 12, padding: 10, borderRadius: 9, backgroundColor: colors.softCream },
+    runwayText: { flex: 1, fontSize: scale(12), lineHeight: scale(17), color: colors.mutedChocolate },
     scopeList: { marginTop: 10, gap: 6 },
     scopeRow: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingVertical: 8, paddingHorizontal: 10, borderRadius: 8, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.softCream },
     scopeRowActive: { borderColor: colors.caramel },

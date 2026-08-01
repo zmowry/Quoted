@@ -15,9 +15,8 @@
     "ios": {
       "bundleIdentifier": "REPLACE_WITH_BUNDLE_ID",
       "buildNumber": "1",
-      "supportsTablet": false
+      "supportsTablet": true
     },
-    "plugins": ["expo-router", "expo-notifications"],
-    "web": { "bundler": "metro" }
+    "plugins": ["expo-router", "expo-notifications"]
   }
 }

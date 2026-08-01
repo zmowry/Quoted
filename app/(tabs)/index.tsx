@@ -12,10 +12,13 @@ import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useQuoteShare } from '@/src/hooks/useQuoteShare';
 import { useTheme } from '@/src/hooks/useTheme';
-import { QUOTE_FONT } from '@/src/theme';
+import { QUOTE_FONT, measure } from '@/src/theme';
 import type { Colors } from '@/src/theme';
 import type { Quote } from '@/src/types';
 import { authorPhotos } from '@/src/data/authorPhotos';
+import { themesForQuote, themesInBank } from '@/src/data/authorsData';
+import { themeLabel } from '@/src/data/themes';
+import type { ThemeId } from '@/src/data/themes';
 
 type AuthorGroup = { id: string; authorName: string };
 
@@ -26,6 +29,7 @@ export default function QuoteBankScreen(): ReactElement {
   const router = useRouter();
   const [viewMode, setViewMode] = useState<'random' | 'author'>('random');
   const [activeCollection, setActiveCollection] = useState<string | null>(null);
+  const [activeThemes, setActiveThemes] = useState<ThemeId[]>([]);
   const [search, setSearch] = useState('');
   const [taggedQuote, setTaggedQuote] = useState<Quote | null>(null);
   const [composing, setComposing] = useState(false);
@@ -69,16 +73,37 @@ export default function QuoteBankScreen(): ReactElement {
   const displayed = focused ?? quoteOfDay;
   const sharing = !!displayed && sharingId === displayed.id;
 
+  const bankThemes = useMemo(() => themesInBank(quotes), [quotes]);
+
+  // Deleting the last quote carrying a theme takes its chip away, which would
+  // otherwise strand the filter: no chip left to press to turn it back off.
+  const appliedThemes = useMemo(
+    () => activeThemes.filter((theme) => bankThemes.includes(theme)),
+    [activeThemes, bankThemes],
+  );
+
   const filteredQuotes = useMemo(() => {
     let result = quotes;
     if (activeCollection) {
       const col = collections.find((c) => c.id === activeCollection);
       if (col) result = result.filter((q) => col.quoteIds.includes(q.id));
     }
+    // Every selected theme, not any: more chips has to narrow, matching how the
+    // same row behaves on the Explore tab.
+    if (appliedThemes.length) {
+      result = result.filter((q) => {
+        const themes = themesForQuote(q);
+        return appliedThemes.every((theme) => themes.includes(theme));
+      });
+    }
     const query = search.trim().toLowerCase();
-    if (query) result = result.filter((q) => q.text.toLowerCase().includes(query) || q.authorName.toLowerCase().includes(query));
+    if (query) result = result.filter((q) => q.text.toLowerCase().includes(query)
+      || q.authorName.toLowerCase().includes(query)
+      // Themes match the search box too, so typing "stoicism" finds Seneca's
+      // quotes without going near the chips — as it already does on Explore.
+      || themesForQuote(q).some((theme) => themeLabel(theme).toLowerCase().includes(query)));
     return result;
-  }, [quotes, collections, activeCollection, search]);
+  }, [quotes, collections, activeCollection, appliedThemes, search]);
 
   // Grouped from the filtered set, not the whole bank: the collection chips stay
   // on screen in this view, so ignoring them here would leave a chip highlighted
@@ -192,6 +217,35 @@ export default function QuoteBankScreen(): ReactElement {
           </Pressable>
         </View>
       </View>
+      {/* Its own row rather than more chips on the collection one: a collection is
+          something you filed a quote into, a theme is something the quote already
+          is, and mixing the two in one strip reads as one flat set of tags. */}
+      {bankThemes.length ? (
+        <View style={styles.themeFilterRow}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} testID="bank-theme-chips" style={styles.chipsScroll} contentContainerStyle={styles.chipsContent}>
+            {bankThemes.map((id) => {
+              const active = appliedThemes.includes(id);
+              return (
+                <Pressable
+                  key={id}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: active }}
+                  accessibilityLabel={`Theme ${themeLabel(id)}`}
+                  onPress={() => setActiveThemes((prev) => prev.includes(id) ? prev.filter((t) => t !== id) : [...prev, id])}
+                  style={[styles.themeChip, active && styles.themeChipActive]}
+                >
+                  <Text style={[styles.themeChipText, active && styles.themeChipTextActive]}>{themeLabel(id)}</Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+          {appliedThemes.length ? (
+            <Pressable accessibilityRole="button" accessibilityLabel="Clear theme filters" onPress={() => setActiveThemes([])} style={styles.clearThemes}>
+              <Text style={styles.clearThemesText}>Clear</Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 
@@ -199,11 +253,19 @@ export default function QuoteBankScreen(): ReactElement {
 
   // Reachable from either view, since both are filtered by the same collection
   // and search state.
+  // Named in the order the filters are applied, so the message points at the one
+  // most likely to be responsible rather than always blaming the collection.
   const emptyResults = (
     <View style={styles.empty}>
-      <Text style={styles.emptyTitle}>{search.trim() ? 'No quotes match your search' : 'No quotes in this collection'}</Text>
+      <Text style={styles.emptyTitle}>
+        {search.trim() ? 'No quotes match your search'
+          : appliedThemes.length ? `Nothing tagged ${appliedThemes.map(themeLabel).join(' + ')}`
+          : 'No quotes in this collection'}
+      </Text>
       <Text style={styles.emptyText}>
-        {search.trim() ? 'Try a different word, or clear the search.' : 'Tap the bookmark icon on any saved quote to add it here.'}
+        {search.trim() ? 'Try a different word, or clear the search.'
+          : appliedThemes.length ? 'A quote takes its themes from its author, so narrowing to several at once asks a lot. Try removing one.'
+          : 'Tap the bookmark icon on any saved quote to add it here.'}
       </Text>
     </View>
   );
@@ -280,11 +342,11 @@ export default function QuoteBankScreen(): ReactElement {
         visible={composing || editing !== null}
         quote={editing}
         onClose={() => { setComposing(false); setEditing(null); }}
-        onSubmit={(text, attribution) => {
+        onSubmit={(text, attribution, themes) => {
           // An edit keeps the id so collections and delivery history stay attached;
           // saveQuote appends and dedupes by id, so it would be a no-op here.
-          if (editing) void updateCustomQuote(customQuoteWith(editing.id, text, attribution));
-          else void saveQuote(makeCustomQuote(text, attribution));
+          if (editing) void updateCustomQuote(customQuoteWith(editing.id, text, attribution, themes));
+          else void saveQuote(makeCustomQuote(text, attribution, themes));
         }}
       />
       <CollectionModal
@@ -306,7 +368,7 @@ export default function QuoteBankScreen(): ReactElement {
 function makeStyles(colors: Colors, scale: (n: number) => number) {
   return StyleSheet.create({
     scroll: { flex: 1, backgroundColor: colors.cream },
-    page: { padding: 16 },
+    page: { padding: 16, ...measure },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cream },
     banner: { backgroundColor: colors.chocolate, borderRadius: 20, padding: 22, shadowColor: colors.chocolate, shadowOpacity: .18, shadowRadius: 12, elevation: 4 },
     kicker: { fontWeight: '800', color: colors.gold, fontSize: scale(12), letterSpacing: 1.2 },
@@ -325,7 +387,14 @@ function makeStyles(colors: Colors, scale: (n: number) => number) {
     headingRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 24, marginBottom: 8 },
     heading: { fontSize: scale(22), fontWeight: '800', color: colors.chocolate },
     search: { backgroundColor: colors.white, borderColor: colors.border, borderWidth: 1, borderRadius: 10, paddingVertical: 6, paddingHorizontal: 10, marginBottom: 10, fontSize: scale(13), color: colors.chocolate },
-    chipsToolsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    chipsToolsRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
+    themeFilterRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+    themeChip: { paddingVertical: 4, paddingHorizontal: 10, borderRadius: 20, backgroundColor: colors.softCream, borderWidth: 1, borderColor: colors.border },
+    themeChipActive: { backgroundColor: colors.caramel, borderColor: colors.caramel },
+    themeChipText: { fontSize: scale(11), fontWeight: '700', color: colors.mutedChocolate },
+    themeChipTextActive: { color: colors.white },
+    clearThemes: { paddingVertical: 2, paddingHorizontal: 8 },
+    clearThemesText: { fontSize: scale(12), fontWeight: '700', color: colors.burntCaramel },
     toolRow: { flexDirection: 'row', gap: 8, marginLeft: 8 },
     // Square rather than the chips' pill shape, so the pair reads as controls
     // rather than as two more collections on the end of the row.

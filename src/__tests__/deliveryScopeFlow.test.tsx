@@ -12,9 +12,20 @@ const IMAGINATION = 'Imagination is more important than knowledge.';
 
 const sheet = () => within(screen.getByTestId('collection-sheet'));
 
+/**
+ * Every scheduled notification that actually carries a quote.
+ *
+ * The run ends with a top-up reminder, which is not drawn from any pool and
+ * fires at the daily delivery time — so it would otherwise fail every "these
+ * bodies all came from the scoped collection" assertion below, and slip into
+ * `scheduledBodiesAt` for the daily hour as well.
+ */
+const quoteCalls = () =>
+  jest.mocked(Notifications.scheduleNotificationAsync).mock.calls
+    .filter((call) => call[0].content.title !== 'Your quotes have paused');
+
 /** Every quote body written into a currently-pending notification. */
-const scheduledBodies = (): string[] =>
-  jest.mocked(Notifications.scheduleNotificationAsync).mock.calls.map((call) => String(call[0].content.body));
+const scheduledBodies = (): string[] => quoteCalls().map((call) => String(call[0].content.body));
 
 /**
  * The bodies of the notifications scheduled for one hour of the day. The daily
@@ -22,7 +33,7 @@ const scheduledBodies = (): string[] =>
  * a slot's deliveries apart from the daily one.
  */
 const scheduledBodiesAt = (hour: number): string[] =>
-  jest.mocked(Notifications.scheduleNotificationAsync).mock.calls
+  quoteCalls()
     .filter((call) => (call[0].trigger as unknown as { date: Date }).date.getHours() === hour)
     .map((call) => String(call[0].content.body));
 
@@ -84,7 +95,119 @@ const saveExtras = async (): Promise<void> => {
 const slotChip = (slot: number, label: string) =>
   within(screen.getByTestId(`slot-collections-${slot}`)).getByLabelText(`Quote ${slot + 2} from: ${label}`);
 
+const LUCK = 'Luck is what happens when preparation meets opportunity.';
+
+/**
+ * Saves one Einstein quote and one Seneca quote, so the bank spans two
+ * disjoint-enough theme sets: Einstein carries humor and not stoicism, Seneca
+ * the reverse. Both carry wisdom, which is what makes a shared theme testable.
+ */
+async function seedTwoAuthors(): Promise<void> {
+  const einstein = renderWithProviders(<AuthorDetail authorId="einstein" />);
+  await screen.findByLabelText(`Save ${BICYCLE}`);
+  fireEvent.press(screen.getByLabelText(`Save ${BICYCLE}`));
+  await screen.findByLabelText(`Remove ${BICYCLE}`);
+  einstein.unmount();
+
+  const seneca = renderWithProviders(<AuthorDetail authorId="seneca" />);
+  await screen.findByLabelText(`Save ${LUCK}`);
+  fireEvent.press(screen.getByLabelText(`Save ${LUCK}`));
+  await screen.findByLabelText(`Remove ${LUCK}`);
+  seneca.unmount();
+}
+
+const themeChip = (label: string) =>
+  within(screen.getByTestId('delivery-theme-chips')).getByLabelText(`Deliver from theme ${label}`);
+
 beforeEach(async () => { await AsyncStorage.clear(); jest.clearAllMocks(); });
+
+describe('Theme-scoped delivery', () => {
+  it('offers only themes the bank actually carries', async () => {
+    await seedTwoAuthors();
+    await openDelivery();
+
+    expect(themeChip('Stoicism')).toBeTruthy();
+    expect(themeChip('Humor')).toBeTruthy();
+    // Nothing saved carries justice, and a scope matching nothing would fall
+    // straight back to the whole bank the moment it was chosen.
+    expect(within(screen.getByTestId('delivery-theme-chips')).queryByLabelText('Deliver from theme Justice')).toBeNull();
+  });
+
+  it('schedules only quotes carrying the chosen theme', async () => {
+    await seedTwoAuthors();
+    await openDelivery();
+
+    fireEvent.press(themeChip('Stoicism'));
+    await flushPending();
+    jest.mocked(Notifications.scheduleNotificationAsync).mockClear();
+    fireEvent.press(themeChip('Stoicism'));
+    await flushPending();
+
+    const bodies = scheduledBodies();
+    expect(bodies.length).toBeGreaterThan(0);
+    expect(bodies.every((body) => body.includes('Luck is what happens'))).toBe(true);
+    expect(bodies.some((body) => body.includes('riding a bicycle'))).toBe(false);
+  });
+
+  it('persists the scope and reports what it is drawing from', async () => {
+    await seedTwoAuthors();
+    await openDelivery();
+
+    fireEvent.press(themeChip('Humor'));
+    await waitFor(async () => {
+      const stored = JSON.parse(String(await AsyncStorage.getItem(STORAGE_KEYS.deliveryScope)));
+      expect(stored).toEqual({ kind: 'theme', id: 'humor' });
+    });
+    expect(screen.getByText(/Delivering from 1 quote tagged Humor/)).toBeTruthy();
+  });
+
+  it('replaces a collection scope rather than stacking with it', async () => {
+    // One scope, two ways of naming it: picking a theme has to clear the
+    // collection radio, or the screen would show two selections and the pool
+    // could only honour one of them.
+    await seedBankWithCollection('Favourites');
+    await openDelivery();
+
+    fireEvent.press(screen.getByText('Favourites'));
+    await flushPending();
+    fireEvent.press(themeChip('Humor'));
+    await flushPending();
+
+    expect(screen.getByRole('button', { name: 'Favourites' })).toHaveAccessibilityState({ selected: false });
+    expect(themeChip('Humor')).toHaveAccessibilityState({ selected: true });
+  });
+
+  it('widens back to the whole bank when nothing carries the theme any more', async () => {
+    await seedTwoAuthors();
+    await openDelivery();
+    fireEvent.press(themeChip('Stoicism'));
+    await flushPending();
+    screen.unmount();
+
+    // Deleting the only stoic quote leaves the scope pointing at nothing.
+    const bank = renderWithProviders(<QuoteBankScreen />);
+    await screen.findByText('My saved quotes');
+    fireEvent.press(await screen.findByLabelText(`Delete ${LUCK}`));
+    await flushPending();
+    bank.unmount();
+
+    await openDelivery();
+    // Delivering nothing every morning would be the worse failure, so the pool
+    // widens — and says so rather than leaving the fallback invisible.
+    expect(screen.getByText(/Nothing in your bank carries that theme right now/)).toBeTruthy();
+  });
+
+  it('survives a remount', async () => {
+    await seedTwoAuthors();
+    await openDelivery();
+    fireEvent.press(themeChip('Stoicism'));
+    await flushPending();
+    screen.unmount();
+
+    await openDelivery();
+    expect(themeChip('Stoicism')).toHaveAccessibilityState({ selected: true });
+  });
+});
 
 describe('Collection-scoped delivery', () => {
   it('defaults to the whole bank', async () => {
@@ -110,9 +233,10 @@ describe('Collection-scoped delivery', () => {
 
     fireEvent.press(screen.getByText('Favourites'));
     await waitFor(async () => {
-      expect(await AsyncStorage.getItem(STORAGE_KEYS.deliveryCollection)).toBeTruthy();
+      const stored = JSON.parse(String(await AsyncStorage.getItem(STORAGE_KEYS.deliveryScope)));
+      expect(stored).toMatchObject({ kind: 'collection' });
     });
-    expect(screen.getByText('Delivering from 1 quote in this collection.')).toBeTruthy();
+    expect(screen.getByText(/Delivering from 1 quote/)).toBeTruthy();
   });
 
   // The point of the feature: only the scoped quote should reach the OS.
@@ -246,6 +370,36 @@ describe('Per-slot collections for extra quotes', () => {
     bank.unmount();
 
     const stored = JSON.parse(String(await AsyncStorage.getItem(STORAGE_KEYS.extra)));
-    expect(stored.collectionIds.every((id: string | null) => id === null)).toBe(true);
+    expect(stored.scopes.every((scope: unknown) => scope === null)).toBe(true);
+  });
+
+  // Offered on slots as well as on the daily scope: narrowing delivery to a
+  // theme would otherwise leave the slots unable to say the same thing.
+  it('scopes a slot to a theme', async () => {
+    await seedTwoAuthors();
+    await openDelivery();
+    await enableOneExtra();
+
+    fireEvent.press(slotChip(0, 'Stoicism'));
+    jest.mocked(Notifications.scheduleNotificationAsync).mockClear();
+    await saveExtras();
+
+    const slotBodies = scheduledBodiesAt(12);
+    expect(slotBodies.length).toBeGreaterThan(0);
+    expect(slotBodies.every((body) => body.includes('Luck is what happens'))).toBe(true);
+  });
+
+  it('remembers a theme slot across a remount', async () => {
+    await seedTwoAuthors();
+    await openDelivery();
+    await enableOneExtra();
+
+    fireEvent.press(slotChip(0, 'Stoicism'));
+    await saveExtras();
+    screen.unmount();
+
+    await openDelivery();
+    await enableOneExtra();
+    expect(slotChip(0, 'Stoicism')).toHaveAccessibilityState({ selected: true });
   });
 });

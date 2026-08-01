@@ -7,6 +7,7 @@ import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useTheme } from '@/src/hooks/useTheme';
 import { dateKey, deliveredHistory, deliveryStats } from '@/src/services/queueManager';
 import type { DeliveredHistory, DeliveryStats } from '@/src/services/queueManager';
+import { measure } from '@/src/theme';
 import type { Colors } from '@/src/theme';
 
 function Stat({ value, label, styles }: { value: string; label: string; styles: ReturnType<typeof makeStyles> }): ReactElement {
@@ -98,7 +99,7 @@ export default function HistoryScreen(): ReactElement {
 function makeStyles(colors: Colors, scale: (n: number) => number) {
   return StyleSheet.create({
     scroll: { flex: 1, backgroundColor: colors.cream },
-    page: { padding: 16 },
+    page: { padding: 16, ...measure },
     center: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.cream },
     statsCard: { backgroundColor: colors.white, borderRadius: 14, borderWidth: 1, borderColor: colors.border, padding: 14, marginBottom: 16 },
     statsRow: { flexDirection: 'row', alignItems: 'flex-start' },

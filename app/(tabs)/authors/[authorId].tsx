@@ -11,7 +11,7 @@ import { useCopyFeedback } from '@/src/hooks/useCopyFeedback';
 import { useQuoteBank } from '@/src/hooks/useQuoteBank';
 import { useQuoteShare } from '@/src/hooks/useQuoteShare';
 import { useTheme } from '@/src/hooks/useTheme';
-import { QUOTE_FONT } from '@/src/theme';
+import { QUOTE_FONT, measure } from '@/src/theme';
 import type { Colors } from '@/src/theme';
 import type { Quote } from '@/src/types';
 
@@ -53,7 +53,7 @@ export function AuthorDetail({ authorId }: { authorId: string }): ReactElement {
     </View>
   );
   return (
-    <ScrollView contentContainerStyle={styles.page}>
+    <ScrollView style={styles.scroll} contentContainerStyle={[styles.page, styles.measure]}>
       <View style={styles.header}>
         <View style={styles.headerText}>
           <Text style={styles.name}>{author.name}</Text>
@@ -117,7 +117,11 @@ export default function AuthorDetailScreen(): ReactElement {
 
 function makeStyles(colors: Colors, scale: (n: number) => number) {
   return StyleSheet.create({
+    // Kept full-bleed: it also backs the "Author not found" branch, which has no
+    // scroll view behind it to paint the margins on a wide screen.
     page: { padding: 20, backgroundColor: colors.cream, flexGrow: 1 },
+    scroll: { flex: 1, backgroundColor: colors.cream },
+    measure,
     header: { flexDirection: 'row', alignItems: 'center', marginBottom: 22 },
     headerText: { flex: 1, paddingRight: 16 },
     name: { fontSize: scale(29), fontWeight: '800', color: colors.chocolate },

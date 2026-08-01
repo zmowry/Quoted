@@ -48,3 +48,19 @@ export const colors = lightColors;
  * scale)` in five files and imply to the next reader that it is configurable.
  */
 export const QUOTE_FONT = 'Georgia';
+
+/**
+ * How wide the reading column is allowed to get.
+ *
+ * On a phone every screen is narrower than this, so it changes nothing there.
+ * It exists for iPad, where a full-bleed layout would set quote text in lines
+ * long enough to lose your place between them — the measure, not the screen,
+ * is what a reading app should be laid out to.
+ *
+ * Applied to the *content container* rather than the scroll view, so the
+ * background still reaches both edges and only the text is inset.
+ */
+export const CONTENT_MAX_WIDTH = 680;
+
+/** Centres a content container at `CONTENT_MAX_WIDTH` without letting it shrink below the screen. */
+export const measure = { width: '100%', maxWidth: CONTENT_MAX_WIDTH, alignSelf: 'center' } as const;

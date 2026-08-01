@@ -1,9 +1,11 @@
 import { fireEvent, screen, within } from '@testing-library/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { renderWithProviders } from '@/src/test-utils';
+import { flushPending, renderWithProviders } from '@/src/test-utils';
 import { authorsData } from '@/src/data/authorsData';
+import { STORAGE_KEYS } from '@/src/services/storage';
 import { THEMES } from '@/src/data/themes';
 import type { ThemeId } from '@/src/data/themes';
+import QuoteBankScreen from '../../app/(tabs)/index';
 import AuthorsScreen from '../../app/(tabs)/authors/index';
 import { AuthorDetail } from '../../app/(tabs)/authors/[authorId]';
 
@@ -102,6 +104,131 @@ describe('Theme filtering', () => {
     fireEvent.changeText(screen.getByLabelText('Search authors'), 'stoicism');
     expect(screen.getByText('Seneca')).toBeTruthy();
     expect(screen.queryByText('Maya Angelou')).toBeNull();
+  });
+});
+
+/**
+ * Seeded from three authors whose tags overlap in known ways:
+ *   einstein  creativity wisdom change simplicity humor truth
+ *   twain     humor wisdom courage truth change
+ *   seneca    stoicism time wisdom resilience simplicity purpose
+ * So 'stoicism' isolates Seneca, 'humor' catches two, 'wisdom' catches all
+ * three, and no seeded author carries 'justice' or 'solitude'.
+ */
+describe('Filtering the bank by theme', () => {
+  const EINSTEIN = 'Imagination rules the world.';
+  const SENECA = 'We suffer more in imagination than in reality.';
+  const TWAIN = 'Courage is resistance to fear.';
+  const MINE = 'The work is the reward.';
+
+  const seedBank = (extra: unknown[] = []) => AsyncStorage.setItem(STORAGE_KEYS.quotes, JSON.stringify([
+    { id: 'e1', text: EINSTEIN, authorId: 'einstein', authorName: 'Albert Einstein' },
+    { id: 's1', text: SENECA, authorId: 'seneca', authorName: 'Seneca' },
+    { id: 't1', text: TWAIN, authorId: 'twain', authorName: 'Mark Twain' },
+    ...extra,
+  ]));
+
+  const openBank = async (): Promise<void> => {
+    renderWithProviders(<QuoteBankScreen />);
+    await screen.findByText('My saved quotes');
+    await flushPending();
+  };
+
+  const bankChips = () => within(screen.getByTestId('bank-theme-chips'));
+  const pickBankTheme = (label: string) => fireEvent.press(bankChips().getByLabelText(`Theme ${label}`));
+  const showing = (text: string) => screen.queryByLabelText(`Delete ${text}`) !== null;
+
+  it('narrows the bank to the chosen theme', async () => {
+    await seedBank();
+    await openBank();
+
+    pickBankTheme('Stoicism');
+    expect(showing(SENECA)).toBe(true);
+    expect(showing(EINSTEIN)).toBe(false);
+    expect(showing(TWAIN)).toBe(false);
+  });
+
+  it('offers only themes the bank actually holds', async () => {
+    // A chip for a theme nobody has saved could only ever empty the list.
+    await seedBank();
+    await openBank();
+
+    expect(bankChips().getByLabelText('Theme Humor')).toBeTruthy();
+    expect(bankChips().queryByLabelText('Theme Justice')).toBeNull();
+  });
+
+  it('requires a quote to carry every selected theme', async () => {
+    await seedBank();
+    await openBank();
+
+    pickBankTheme('Humor');
+    expect(showing(EINSTEIN)).toBe(true);
+    expect(showing(TWAIN)).toBe(true);
+
+    // Twain is tagged with courage; Einstein is not.
+    pickBankTheme('Courage');
+    expect(showing(TWAIN)).toBe(true);
+    expect(showing(EINSTEIN)).toBe(false);
+  });
+
+  it('explains an over-narrowed filter rather than showing a blank list', async () => {
+    await seedBank();
+    await openBank();
+
+    pickBankTheme('Stoicism');
+    pickBankTheme('Humor');
+    expect(screen.getByText('Nothing tagged Stoicism + Humor')).toBeTruthy();
+  });
+
+  it('restores the whole bank when the filter is cleared', async () => {
+    await seedBank();
+    await openBank();
+
+    pickBankTheme('Stoicism');
+    expect(showing(EINSTEIN)).toBe(false);
+
+    fireEvent.press(screen.getByLabelText('Clear theme filters'));
+    expect(showing(EINSTEIN)).toBe(true);
+  });
+
+  it('matches themes from the bank search box', async () => {
+    await seedBank();
+    await openBank();
+
+    // 'stoicism' appears in neither the quote's text nor Seneca's name.
+    fireEvent.changeText(screen.getByLabelText('Search your quotes'), 'stoicism');
+    expect(showing(SENECA)).toBe(true);
+    expect(showing(EINSTEIN)).toBe(false);
+  });
+
+  it('honours the themes on a quote the user wrote', async () => {
+    // The case author-inherited themes cannot reach: a `custom:` authorId has no
+    // author record, so its own tags are all it has.
+    await seedBank([{ id: 'c1', text: MINE, authorId: 'custom:me', authorName: 'Me', themes: ['solitude'] }]);
+    await openBank();
+
+    pickBankTheme('Solitude');
+    expect(showing(MINE)).toBe(true);
+    expect(showing(SENECA)).toBe(false);
+  });
+
+  it('shows no theme row at all for an empty bank', async () => {
+    await openBank();
+    expect(screen.queryByTestId('bank-theme-chips')).toBeNull();
+  });
+
+  it('does not strand a filter whose last quote was deleted', async () => {
+    // Deleting the only stoic quote takes its chip with it, leaving nothing to
+    // press to turn the filter back off.
+    await seedBank();
+    await openBank();
+
+    pickBankTheme('Stoicism');
+    fireEvent.press(screen.getByLabelText(`Delete ${SENECA}`));
+    await flushPending();
+
+    expect(screen.queryByLabelText('Theme Stoicism')).toBeNull();
+    expect(showing(EINSTEIN)).toBe(true);
   });
 });
 

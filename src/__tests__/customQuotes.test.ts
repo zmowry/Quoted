@@ -7,8 +7,47 @@ import {
   makeCustomQuote,
   slugAttribution,
 } from '@/src/customQuotes';
+import { themesForQuote } from '@/src/data/authorsData';
 
 /** A unit test for a pure module, sitting alongside the screen tests for locality. */
+
+/**
+ * A custom quote's `authorId` is a `custom:` slug with no author record behind
+ * it, so its own tags are the only themes it can ever have.
+ */
+describe('Themes on a quote you wrote', () => {
+  it('carries the themes it was given', () => {
+    const quote = makeCustomQuote('Keep going', 'Ada Lovelace', ['courage', 'resilience']);
+    expect(themesForQuote(quote)).toEqual(['courage', 'resilience']);
+  });
+
+  it('leaves the field off entirely when nothing was chosen', () => {
+    // Shaped exactly like a quote written before themes existed, so the two need
+    // no migration to tell apart.
+    const quote = makeCustomQuote('Keep going', 'Ada Lovelace');
+    expect('themes' in quote).toBe(false);
+    expect(themesForQuote(quote)).toEqual([]);
+  });
+
+  it('drops duplicates rather than storing a theme twice', () => {
+    expect(makeCustomQuote('Keep going', 'Ada', ['hope', 'hope']).themes).toEqual(['hope']);
+  });
+
+  it('lets an edit clear every theme back off', () => {
+    // The failure this guards: merging into what was stored, which would make the
+    // last theme impossible to remove.
+    const tagged = makeCustomQuote('Keep going', 'Ada', ['hope']);
+    const cleared = customQuoteWith(tagged.id, 'Keep going', 'Ada', []);
+    expect('themes' in cleared).toBe(false);
+    expect(themesForQuote(cleared)).toEqual([]);
+  });
+
+  it('still inherits an author\'s themes for a built-in quote', () => {
+    // Themes stay a fact about the writer for the catalogue; only custom quotes
+    // carry their own.
+    expect(themesForQuote({ authorId: 'seneca' })).toContain('stoicism');
+  });
+});
 
 describe('makeCustomQuote', () => {
   it('marks the quote as the user\'s own', () => {

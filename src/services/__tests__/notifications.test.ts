@@ -19,18 +19,31 @@ const planFrom = (days: number, quotes: (Quote | undefined)[], extras: Quote[] =
   });
 
 /**
- * Which collection each slot draws from is settled by the time a plan reaches
- * the scheduler — it only reads `enabled`, `count` and `times` — so these fixtures
- * leave the ids off rather than pretending to exercise them.
+ * Which pool each slot draws from is settled by the time a plan reaches the
+ * scheduler — it only reads `enabled`, `count` and `times` — so these fixtures
+ * leave the scopes off rather than pretending to exercise them.
  */
-const extrasSettings = (settings: Omit<AdditionalQuotesSettings, 'collectionIds'>): AdditionalQuotesSettings =>
-  ({ ...settings, collectionIds: [] });
+const extrasSettings = (settings: Omit<AdditionalQuotesSettings, 'scopes'>): AdditionalQuotesSettings =>
+  ({ ...settings, scopes: [] });
 
-const requests = (): { content: { body: string; sound: boolean; data?: { quoteId?: string; authorId?: string } }; trigger: { type: string; date: Date } }[] =>
+interface Request { content: { title: string; body: string; sound: boolean; data?: { quoteId?: string; authorId?: string } }; trigger: { type: string; date: Date } }
+
+const requests = (): Request[] =>
   (Notifications.scheduleNotificationAsync as jest.Mock).mock.calls.map(([request]) => request);
-const bodies = (): string[] => requests().map((request) => request.content.body);
-const dates = (): Date[] => requests().map((request) => request.trigger.date);
-const quoteIds = (): (string | undefined)[] => requests().map((request) => request.content.data?.quoteId);
+
+/**
+ * A successful pass now ends with a top-up reminder, which is not a quote and
+ * would otherwise land in the middle of every body/date/id assertion below.
+ * Separating the two by title keeps those assertions about the rotation, and
+ * gives the reminder's own tests something to name it by.
+ */
+const REMINDER_TITLE = 'Your quotes have paused';
+const quoteRequests = (): Request[] => requests().filter((request) => request.content.title !== REMINDER_TITLE);
+const reminder = (): Request | undefined => requests().find((request) => request.content.title === REMINDER_TITLE);
+
+const bodies = (): string[] => quoteRequests().map((request) => request.content.body);
+const dates = (): Date[] => quoteRequests().map((request) => request.trigger.date);
+const quoteIds = (): (string | undefined)[] => quoteRequests().map((request) => request.content.data?.quoteId);
 
 describe('scheduleAllNotifications', () => {
   beforeEach(() => jest.clearAllMocks());
@@ -65,8 +78,9 @@ describe('scheduleAllNotifications', () => {
   });
 
   it('degrades gracefully when notifications are unsupported or fail', async () => {
-    (Notifications.getPermissionsAsync as jest.Mock).mockRejectedValueOnce(new Error('Unsupported on web'));
-    await expect(scheduleAllNotifications(nine, planFrom(1, [quote]), undefined, { now: NOW })).resolves.toBeUndefined();
+    (Notifications.getPermissionsAsync as jest.Mock).mockRejectedValueOnce(new Error('Unsupported'));
+    await expect(scheduleAllNotifications(nine, planFrom(1, [quote]), undefined, { now: NOW }))
+      .resolves.toEqual({ through: undefined, truncated: false, scheduled: 0 });
   });
 
   it('schedules nothing when permission is refused', async () => {
@@ -82,7 +96,7 @@ describe('scheduleAllNotifications', () => {
     // daily quote, rather than being picked off by array position here.
     await scheduleAllNotifications(nine, planFrom(2, [quote], [second, third]), extra, { now: NOW });
     // 2 days x (1 daily + 2 additional)
-    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(6);
+    expect(quoteRequests()).toHaveLength(6);
     expect(bodies().slice(0, 3)).toEqual([
       '"Keep moving" -- Albert Einstein',
       '"Stay curious" -- Albert Einstein',
@@ -95,13 +109,13 @@ describe('scheduleAllNotifications', () => {
   it('schedules only the daily quote when additional quotes are disabled', async () => {
     const extra = extrasSettings({ enabled: false, count: 3, times: [{ hour: 12, minute: 0 }] });
     await scheduleAllNotifications(nine, planFrom(1, [quote], [second]), extra, { now: NOW });
-    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(1);
+    expect(quoteRequests()).toHaveLength(1);
   });
 
   it('never schedules more extras than it has times for', async () => {
     const extra = extrasSettings({ enabled: true, count: 5, times: [{ hour: 12, minute: 0 }] });
     await scheduleAllNotifications(nine, planFrom(1, [quote], [second, third]), extra, { now: NOW });
-    expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(2);
+    expect(quoteRequests()).toHaveLength(2);
   });
 
   it('tags every notification with the quote it carries', async () => {
@@ -132,5 +146,85 @@ describe('scheduleAllNotifications', () => {
     // has to be trimmed here rather than at the platform boundary.
     await scheduleAllNotifications(nine, planFrom(100, [quote]), undefined, { now: NOW });
     expect(Notifications.scheduleNotificationAsync).toHaveBeenCalledTimes(MAX_PENDING);
+    // One slot of that budget belongs to the reminder, not to a quote.
+    expect(quoteRequests()).toHaveLength(MAX_PENDING - 1);
+    expect(reminder()).toBeDefined();
+  });
+});
+
+/**
+ * The rotation is written to the OS ahead of time and only ever extended when
+ * the app is launched, so a user who stops opening it stops receiving quotes.
+ * Before this reminder existed that happened silently and permanently.
+ */
+describe('top-up reminder', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('lands on the morning after the last covered day, at the delivery time', async () => {
+    // The plan covers 29-31 July, so 1 August at 09:00 is the first moment a
+    // quote is expected and none is queued.
+    await scheduleAllNotifications(nine, planFrom(3, [quote]), undefined, { now: NOW });
+    const when = reminder()?.trigger.date;
+    expect([when?.getMonth(), when?.getDate(), when?.getHours(), when?.getMinutes()]).toEqual([7, 1, 9, 0]);
+  });
+
+  it('follows the delivery time rather than assuming a default', async () => {
+    await scheduleAllNotifications({ hour: 18, minute: 45 }, planFrom(1, [quote]), undefined, { now: NOW });
+    const when = reminder()?.trigger.date;
+    expect([when?.getDate(), when?.getHours(), when?.getMinutes()]).toEqual([30, 18, 45]);
+  });
+
+  it('carries no quote id, so tapping it falls back to today\'s quote', async () => {
+    await scheduleAllNotifications(nine, planFrom(1, [quote]), undefined, { now: NOW });
+    expect(reminder()?.content.data).toBeUndefined();
+  });
+
+  it('is not scheduled for an empty bank', async () => {
+    // Those days carry 'No quotes saved!', not quotes. Telling someone with
+    // nothing saved that their quotes have paused would be nonsense.
+    await scheduleAllNotifications(nine, planFrom(2, [undefined]), undefined, { now: NOW });
+    expect(reminder()).toBeUndefined();
+  });
+
+  it('is not scheduled when permission was refused', async () => {
+    (Notifications.getPermissionsAsync as jest.Mock).mockResolvedValueOnce({ status: 'denied' });
+    (Notifications.requestPermissionsAsync as jest.Mock).mockResolvedValueOnce({ status: 'denied' });
+    await scheduleAllNotifications(nine, planFrom(3, [quote]), undefined, { now: NOW });
+    expect(reminder()).toBeUndefined();
+  });
+
+  it('is measured from the last day actually scheduled, not the last day planned', async () => {
+    // The whole point: when the budget truncates the plan, the reminder has to
+    // follow the truncation rather than the horizon that was asked for, or it
+    // would fire weeks after delivery had already stopped.
+    await scheduleAllNotifications(nine, planFrom(100, [quote]), undefined, { now: NOW });
+    const lastQuote = dates()[dates().length - 1];
+    const when = reminder()?.trigger.date;
+    expect(when && when.getTime() - lastQuote.getTime()).toBe(24 * 60 * 60 * 1000);
+  });
+});
+
+describe('schedule coverage', () => {
+  beforeEach(() => jest.clearAllMocks());
+
+  it('reports the last covered day and a clean run', async () => {
+    const coverage = await scheduleAllNotifications(nine, planFrom(3, [quote]), undefined, { now: NOW });
+    expect(coverage.scheduled).toBe(3);
+    expect(coverage.truncated).toBe(false);
+    expect(coverage.through?.getDate()).toBe(31);
+  });
+
+  it('flags a plan the notification budget cut short', async () => {
+    const coverage = await scheduleAllNotifications(nine, planFrom(100, [quote]), undefined, { now: NOW });
+    expect(coverage.truncated).toBe(true);
+    expect(coverage.scheduled).toBe(MAX_PENDING - 1);
+  });
+
+  it('reports no coverage for an empty bank, even though it scheduled a nudge', async () => {
+    // `scheduled` counts what reached the OS; `through` answers the question the
+    // settings screen actually asks, which is how long the quotes last.
+    const coverage = await scheduleAllNotifications(nine, planFrom(2, [undefined]), undefined, { now: NOW });
+    expect(coverage.through).toBeUndefined();
+    expect(coverage.scheduled).toBe(2);
   });
 });

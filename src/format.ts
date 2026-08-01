@@ -37,3 +37,18 @@ export const dayLabel = (day: string, todayKey: string): string => {
   const parsed = localDate(day);
   return `${MONTHS[parsed.getMonth()]} ${parsed.getDate()}`;
 };
+
+const WEEKDAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+
+/**
+ * A future delivery day rendered for a human: 'Thu, Aug 14'.
+ *
+ * Built from explicit tables rather than `toLocaleDateString`, for the same
+ * reason `dayLabel` is: the output should not vary with whichever ICU data the
+ * runtime happens to ship, least of all in a string the tests assert on.
+ *
+ * Carries the weekday because it names a day the user is being asked to act
+ * before, and 'Aug 14' alone does not say how soon that is.
+ */
+export const coverageLabel = (date: Date): string =>
+  `${WEEKDAYS[date.getDay()]}, ${MONTHS[date.getMonth()]} ${date.getDate()}`;

@@ -2,6 +2,7 @@ import { fireEvent, screen, waitFor, within } from '@testing-library/react-nativ
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
 import { flushPending, renderWithProviders } from '@/src/test-utils';
+import { STORAGE_KEYS } from '@/src/services/storage';
 import QuoteBankScreen from '../../app/(tabs)/index';
 import { AuthorDetail } from '../../app/(tabs)/authors/[authorId]';
 
@@ -217,5 +218,94 @@ describe('Editing your own quote', () => {
     // Built-in text is canonical; editing it would disagree with authorsData.
     expect(screen.getByLabelText(`Edit ${MINE}`)).toBeTruthy();
     expect(screen.queryByLabelText(`Edit ${BICYCLE}`)).toBeNull();
+  });
+});
+
+describe('Tagging a quote you wrote', () => {
+  /** Opens the compose sheet's theme grid, which starts collapsed. */
+  const openThemes = async (): Promise<void> => {
+    fireEvent.press(sheet().getByLabelText('Add themes'));
+    await screen.findByLabelText('Theme Courage');
+  };
+
+  const storedQuotes = async (): Promise<{ text: string; themes?: string[] }[]> =>
+    JSON.parse((await AsyncStorage.getItem(STORAGE_KEYS.quotes)) ?? '[]');
+
+  it('saves the themes picked in the sheet', async () => {
+    await openBank();
+    fireEvent.press(screen.getByLabelText('Write your own quote'));
+    await screen.findByTestId('compose-sheet');
+    fireEvent.changeText(sheet().getByLabelText('Quote text'), MINE);
+    await openThemes();
+    fireEvent.press(sheet().getByLabelText('Theme Courage'));
+    fireEvent.press(sheet().getByLabelText('Theme Purpose'));
+    fireEvent.press(sheet().getByText('Add to my bank'));
+    await flushPending();
+
+    const [saved] = await storedQuotes();
+    expect(saved.themes).toEqual(['courage', 'purpose']);
+  });
+
+  it('starts collapsed, so tagging is opt-in', async () => {
+    // 21 chips open by default would bury the buttons under the keyboard for the
+    // majority of quotes, which are written and saved without any tagging.
+    await openBank();
+    fireEvent.press(screen.getByLabelText('Write your own quote'));
+    await screen.findByTestId('compose-sheet');
+    expect(screen.queryByLabelText('Theme Courage')).toBeNull();
+  });
+
+  it('reopens an edited quote with its themes already showing', async () => {
+    await openBank();
+    fireEvent.press(screen.getByLabelText('Write your own quote'));
+    await screen.findByTestId('compose-sheet');
+    fireEvent.changeText(sheet().getByLabelText('Quote text'), MINE);
+    await openThemes();
+    fireEvent.press(sheet().getByLabelText('Theme Courage'));
+    fireEvent.press(sheet().getByText('Add to my bank'));
+    await flushPending();
+
+    fireEvent.press(await screen.findByLabelText(`Edit ${MINE}`));
+    await screen.findByTestId('compose-sheet');
+    // Open without being asked, or the existing tags are invisible behind a
+    // header the user has to think to press.
+    expect(sheet().getByLabelText('Theme Courage').props.accessibilityState).toEqual(
+      expect.objectContaining({ selected: true }),
+    );
+  });
+
+  it('lets an edit remove the last theme', async () => {
+    await openBank();
+    fireEvent.press(screen.getByLabelText('Write your own quote'));
+    await screen.findByTestId('compose-sheet');
+    fireEvent.changeText(sheet().getByLabelText('Quote text'), MINE);
+    await openThemes();
+    fireEvent.press(sheet().getByLabelText('Theme Courage'));
+    fireEvent.press(sheet().getByText('Add to my bank'));
+    await flushPending();
+
+    fireEvent.press(await screen.findByLabelText(`Edit ${MINE}`));
+    await screen.findByTestId('compose-sheet');
+    fireEvent.press(sheet().getByLabelText('Theme Courage'));
+    fireEvent.press(sheet().getByText('Save changes'));
+    await flushPending();
+
+    const [saved] = await storedQuotes();
+    expect(saved.themes).toBeUndefined();
+  });
+
+  it('does not leak themes from one compose into the next', async () => {
+    await openBank();
+    fireEvent.press(screen.getByLabelText('Write your own quote'));
+    await screen.findByTestId('compose-sheet');
+    fireEvent.changeText(sheet().getByLabelText('Quote text'), MINE);
+    await openThemes();
+    fireEvent.press(sheet().getByLabelText('Theme Courage'));
+    fireEvent.press(sheet().getByText('Add to my bank'));
+    await flushPending();
+
+    await write('A second quote.');
+    const saved = await storedQuotes();
+    expect(saved.find((quote) => quote.text === 'A second quote.')?.themes).toBeUndefined();
   });
 });

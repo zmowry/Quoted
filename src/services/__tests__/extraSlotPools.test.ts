@@ -19,7 +19,8 @@ jest.mock('@/src/services/storage', () => {
 
 import { extraSlotCount, nextQuoteInCycle, planRotation, rotationPools } from '@/src/services/queueManager';
 import { quoteStorage } from '@/src/services/storage';
-import type { AdditionalQuotesSettings, Collection, Quote } from '@/src/types';
+import { ALL_QUOTES } from '@/src/types';
+import type { AdditionalQuotesSettings, Collection, DeliveryScope, Quote } from '@/src/types';
 
 const store = quoteStorage as unknown as { __shown: () => string[]; __reset: () => void };
 
@@ -32,9 +33,14 @@ const extras = (partial: Partial<AdditionalQuotesSettings> = {}): AdditionalQuot
   enabled: true,
   count: 1,
   times: [{ hour: 12, minute: 0 }, { hour: 20, minute: 0 }],
-  collectionIds: [null, null, null, null, null],
+  scopes: [null, null, null, null, null],
   ...partial,
 });
+
+const inCollection = (id: string): DeliveryScope => ({ kind: 'collection', id });
+/** Per-slot scopes, padded to full length the way stored settings arrive. */
+const slots = (...scopes: (DeliveryScope | null)[]): (DeliveryScope | null)[] =>
+  Array.from({ length: 5 }, (_, i) => scopes[i] ?? null);
 
 beforeEach(() => { jest.clearAllMocks(); store.__reset(); });
 
@@ -51,43 +57,53 @@ describe('extraSlotCount', () => {
 describe('rotationPools', () => {
   const collections = [collection('c1', ['a', 'b']), collection('c2', ['d'])];
 
-  it('gives a slot with no collection of its own the daily pool', () => {
+  it('gives a slot with no scope of its own the daily pool', () => {
     // Not the whole bank: a slot left alone tracks the daily scope, so narrowing
     // that narrows the extras with it rather than leaving them disagreeing.
-    const pools = rotationPools(bank, collections, 'c1', extras());
+    const pools = rotationPools(bank, collections, inCollection('c1'), extras());
     expect(ids(pools.main)).toEqual(['a', 'b']);
     expect(ids(pools.extras[0])).toEqual(['a', 'b']);
   });
 
   it('narrows a slot to its own collection, independently of the daily scope', () => {
-    const pools = rotationPools(bank, collections, 'c1', extras({ collectionIds: ['c2', null, null, null, null] }));
+    const pools = rotationPools(bank, collections, inCollection('c1'), extras({ scopes: slots(inCollection('c2')) }));
     expect(ids(pools.main)).toEqual(['a', 'b']);
     expect(ids(pools.extras[0])).toEqual(['d']);
   });
 
   it('builds one pool per active slot and none while switched off', () => {
-    expect(rotationPools(bank, collections, null, extras({ count: 2 })).extras).toHaveLength(2);
-    expect(rotationPools(bank, collections, null, extras({ enabled: false })).extras).toEqual([]);
+    expect(rotationPools(bank, collections, ALL_QUOTES, extras({ count: 2 })).extras).toHaveLength(2);
+    expect(rotationPools(bank, collections, ALL_QUOTES, extras({ enabled: false })).extras).toEqual([]);
   });
 
   // `all` is what reconcileQueue and resetPlanFrom judge a shown id against, so
   // a quote reachable only through an extra slot has to be in it.
   it('unions every pool without repeating a quote in two of them', () => {
-    const pools = rotationPools(bank, collections, 'c1', extras({ count: 2, collectionIds: ['c2', 'c1', null, null, null] }));
+    const pools = rotationPools(bank, collections, inCollection('c1'), extras({ count: 2, scopes: slots(inCollection('c2'), inCollection('c1')) }));
     expect(ids(pools.all).sort()).toEqual(['a', 'b', 'd']);
   });
 
   it('widens a slot back to the bank when its collection is empty or gone', () => {
-    const pools = rotationPools(bank, [collection('c3', [])], null, extras({ count: 2, collectionIds: ['c3', 'missing', null, null, null] }));
+    const pools = rotationPools(bank, [collection('c3', [])], ALL_QUOTES, extras({ count: 2, scopes: slots(inCollection('c3'), inCollection('missing')) }));
     expect(ids(pools.extras[0])).toEqual(ids(bank));
     expect(ids(pools.extras[1])).toEqual(ids(bank));
   });
 
-  it('treats a slot beyond the stored ids as following the daily scope', () => {
-    // Settings written before per-slot collections existed normalise to a padded
+  it('treats a slot beyond the stored scopes as following the daily scope', () => {
+    // Settings written before per-slot scopes existed normalise to a padded
     // array on read, but nothing may fall over if a short one reaches here.
-    const pools = rotationPools(bank, [collection('c1', ['a'])], 'c1', extras({ collectionIds: [] }));
+    const pools = rotationPools(bank, [collection('c1', ['a'])], inCollection('c1'), extras({ scopes: [] }));
     expect(ids(pools.extras[0])).toEqual(['a']);
+  });
+
+  it('scopes a slot to a theme, independently of the daily collection', () => {
+    const stoic: Quote = { id: 's', text: 'S', authorId: 'seneca', authorName: 'Seneca' };
+    const themed = [...bank, stoic];
+    const pools = rotationPools(themed, collections, inCollection('c1'), extras({ scopes: slots({ kind: 'theme', id: 'stoicism' }) }));
+    expect(ids(pools.main)).toEqual(['a', 'b']);
+    expect(ids(pools.extras[0])).toEqual(['s']);
+    // The union still has to reach it, or the cycle would treat 's' as unknown.
+    expect(ids(pools.all).sort()).toEqual(['a', 'b', 's']);
   });
 });
 

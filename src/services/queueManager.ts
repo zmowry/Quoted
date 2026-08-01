@@ -1,30 +1,40 @@
-import type { AdditionalQuotesSettings, Collection, DailyAssignments, PlannedDay, Quote, QuoteOrder } from '@/src/types';
+import type { AdditionalQuotesSettings, Collection, DailyAssignments, DeliveryScope, PlannedDay, Quote, QuoteOrder } from '@/src/types';
+import { themesForQuote } from '@/src/data/authorsData';
 import { quoteStorage } from './storage';
+
+/**
+ * The quotes a scope selects, or null when it selects nothing resolvable — an
+ * `all` scope, or a collection that has since been deleted.
+ *
+ * Null and `[]` are deliberately different: an empty array means the scope
+ * resolved and matched nothing, which the caller still treats as a fallback but
+ * which `deliveryScopeActive` must be able to tell apart from "no scope set".
+ */
+const scopedQuotes = (quotes: Quote[], collections: Collection[], scope: DeliveryScope): Quote[] | null => {
+  if (scope.kind === 'all') return null;
+  if (scope.kind === 'theme') return quotes.filter((quote) => themesForQuote(quote).includes(scope.id));
+  const collection = collections.find((item) => item.id === scope.id);
+  return collection ? quotes.filter((quote) => collection.quoteIds.includes(quote.id)) : null;
+};
 
 /**
  * The quotes the rotation may draw from, given the user's delivery scope.
  *
- * Falls back to the whole bank in two cases that would otherwise be silent dead
- * ends: the chosen collection has been deleted, and the chosen collection is
- * empty. Both would leave someone with a full bank receiving "No quotes saved!"
- * every morning because of a collection they had forgotten about. Delivering
- * something from the wider bank is the better failure, and the settings screen
- * says so rather than leaving the fallback invisible.
+ * Falls back to the whole bank in the cases that would otherwise be silent dead
+ * ends: the chosen collection has been deleted, and the chosen collection or
+ * theme matches none of the saved quotes. All of them would leave someone with a
+ * full bank receiving "No quotes saved!" every morning because of a setting they
+ * had forgotten about. Delivering something from the wider bank is the better
+ * failure, and the settings screen says so rather than leaving it invisible.
  */
-export function deliveryPool(quotes: Quote[], collections: Collection[], collectionId: string | null): Quote[] {
-  if (!collectionId) return quotes;
-  const collection = collections.find((item) => item.id === collectionId);
-  if (!collection) return quotes;
-  const scoped = quotes.filter((quote) => collection.quoteIds.includes(quote.id));
-  return scoped.length ? scoped : quotes;
+export function deliveryPool(quotes: Quote[], collections: Collection[], scope: DeliveryScope): Quote[] {
+  const scoped = scopedQuotes(quotes, collections, scope);
+  return scoped?.length ? scoped : quotes;
 }
 
-/** Whether `deliveryPool` is actually honouring the chosen collection. */
-export const deliveryScopeActive = (quotes: Quote[], collections: Collection[], collectionId: string | null): boolean => {
-  if (!collectionId) return false;
-  const collection = collections.find((item) => item.id === collectionId);
-  return !!collection && quotes.some((quote) => collection.quoteIds.includes(quote.id));
-};
+/** Whether `deliveryPool` is actually honouring the chosen scope. */
+export const deliveryScopeActive = (quotes: Quote[], collections: Collection[], scope: DeliveryScope): boolean =>
+  !!scopedQuotes(quotes, collections, scope)?.length;
 
 /** How many extra notifications a day's settings actually resolve to. */
 export const extraSlotCount = (extras: AdditionalQuotesSettings): number =>
@@ -44,15 +54,15 @@ export interface RotationPools { main: Quote[]; extras: Quote[][]; all: Quote[] 
 export function rotationPools(
   quotes: Quote[],
   collections: Collection[],
-  collectionId: string | null,
+  scope: DeliveryScope,
   extras: AdditionalQuotesSettings,
 ): RotationPools {
-  const main = deliveryPool(quotes, collections, collectionId);
+  const main = deliveryPool(quotes, collections, scope);
   const extraPools = Array.from({ length: extraSlotCount(extras) }, (_, slot) => {
     // null means "follow the daily scope", so the slot tracks `main` rather than
     // widening to the whole bank behind the user's back.
-    const id = extras.collectionIds[slot] ?? null;
-    return id === null ? main : deliveryPool(quotes, collections, id);
+    const slotScope = extras.scopes[slot] ?? null;
+    return slotScope === null ? main : deliveryPool(quotes, collections, slotScope);
   });
   const seen = new Set<string>();
   const all: Quote[] = [];

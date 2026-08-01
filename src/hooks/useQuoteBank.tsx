@@ -1,12 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { PropsWithChildren, ReactElement } from 'react';
 import { AppState } from 'react-native';
-import type { AdditionalQuotesSettings, Collection, NotificationTime, Quote, QuoteBankContextValue, QuoteOrder } from '@/src/types';
+import { ALL_QUOTES } from '@/src/types';
+import type { AdditionalQuotesSettings, Collection, DeliveryScope, NotificationTime, Quote, QuoteBankContextValue, QuoteOrder } from '@/src/types';
 import { isCustomQuote } from '@/src/customQuotes';
 import { DEFAULT_EXTRA_QUOTES, DEFAULT_NOTIFICATION_TIME, DEFAULT_QUOTE_ORDER, DEFAULT_SOUND_ENABLED, quoteStorage } from '@/src/services/storage';
 import { dateKey, extraSlotCount, planRotation, reassignDate, reconcileQueue, resetPlanFrom, rotationPools } from '@/src/services/queueManager';
 import type { RotationPools } from '@/src/services/queueManager';
 import { cancelAllNotifications, scheduleAllNotifications } from '@/src/services/notifications';
+import type { ScheduleCoverage } from '@/src/services/notifications';
 
 const QuoteBankContext = createContext<QuoteBankContextValue | undefined>(undefined);
 
@@ -27,6 +29,17 @@ const UNDO_WINDOW_MS = 6000;
 
 const uid = () => Math.random().toString(36).slice(2);
 
+/**
+ * Whether a scope points at this particular collection.
+ *
+ * Only collection scopes are affected when a collection is deleted — a theme
+ * scope has nothing to do with it, and neither has `all` — so every place that
+ * used to compare an id against a nullable field now has to check the variant
+ * first. Naming it once keeps that from being open-coded five times.
+ */
+const isCollection = (scope: DeliveryScope | null, collectionId: string): boolean =>
+  scope?.kind === 'collection' && scope.id === collectionId;
+
 export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement {
   const [quotes, setQuotes] = useState<Quote[]>([]);
   const [quoteOfDay, setQuoteOfDay] = useState<Quote>();
@@ -35,9 +48,12 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
   const [collections, setCollections] = useState<Collection[]>([]);
   const [quoteOrder, setQuoteOrder] = useState<QuoteOrder>(DEFAULT_QUOTE_ORDER);
   const [soundEnabled, setSoundEnabled] = useState(DEFAULT_SOUND_ENABLED);
-  const [deliveryCollectionId, setDeliveryCollectionId] = useState<string | null>(null);
+  const [deliveryScope, setDeliveryScope] = useState<DeliveryScope>(ALL_QUOTES);
   const [loading, setLoading] = useState(true);
   const [lastRemoved, setLastRemoved] = useState<Quote>();
+  // How far the OS is actually queued out to. Held in state rather than derived,
+  // because only the scheduler knows where the notification budget landed.
+  const [scheduleCoverage, setScheduleCoverage] = useState<ScheduleCoverage>();
 
   // The collections a removed quote belonged to are stripped on delete, so they
   // are held alongside it — restoring the quote without them would silently drop
@@ -71,7 +87,7 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
       });
       setQuoteOfDay(plan[0]?.quote);
       syncedFor.current = dateKey();
-      await scheduleAllNotifications(time, plan, extras, { sound });
+      setScheduleCoverage(await scheduleAllNotifications(time, plan, extras, { sound }));
     };
     pending.current = pending.current.then(run, run);
     return pending.current;
@@ -89,14 +105,14 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
   useEffect(() => () => { if (undoTimer.current) clearTimeout(undoTimer.current); }, []);
 
   const refreshQuoteOfDay = useCallback(async () => {
-    const pools = rotationPools(await quoteStorage.getQuotes(), collections, deliveryCollectionId, additionalQuotes);
+    const pools = rotationPools(await quoteStorage.getQuotes(), collections, deliveryScope, additionalQuotes);
     // An explicit refresh is the one case that should burn a quote. Replacing
     // today's also invalidates the days planned behind it, which would otherwise
     // be free to repeat the quote just drawn.
     await reassignDate(dateKey(), pools.main, quoteOrder);
     await resetPlanFrom(dateKey(), pools.all);
     await syncSchedule(pools, notificationTime, additionalQuotes, quoteOrder, soundEnabled);
-  }, [collections, deliveryCollectionId, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+  }, [collections, deliveryScope, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
   useEffect(() => { void (async () => {
     try {
@@ -104,10 +120,10 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
         quoteStorage.getQuotes(), quoteStorage.getNotificationTime(),
         quoteStorage.getAdditionalQuotes(), quoteStorage.getCollections(),
         quoteStorage.getQuoteOrder(), quoteStorage.getSoundEnabled(),
-        quoteStorage.getDeliveryCollection(),
+        quoteStorage.getDeliveryScope(),
       ]);
       setQuotes(storedQuotes); setTime(storedTime); setAdditionalQuotes(storedExtra); setCollections(storedCollections);
-      setQuoteOrder(storedOrder); setSoundEnabled(storedSound); setDeliveryCollectionId(storedDelivery);
+      setQuoteOrder(storedOrder); setSoundEnabled(storedSound); setDeliveryScope(storedDelivery);
       // Tops the horizon back up: days that have already been delivered are
       // spent, so every launch extends the run back out to its full length.
       await syncSchedule(rotationPools(storedQuotes, storedCollections, storedDelivery, storedExtra), storedTime, storedExtra, storedOrder, storedSound);
@@ -123,22 +139,22 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
       void (async () => {
         const latest = await quoteStorage.getQuotes();
         setQuotes(latest);
-        await syncSchedule(rotationPools(latest, collections, deliveryCollectionId, additionalQuotes), notificationTime, additionalQuotes, quoteOrder, soundEnabled);
+        await syncSchedule(rotationPools(latest, collections, deliveryScope, additionalQuotes), notificationTime, additionalQuotes, quoteOrder, soundEnabled);
       })();
     });
     return () => sub.remove();
-  }, [loading, collections, deliveryCollectionId, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+  }, [loading, collections, deliveryScope, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
   const saveQuote = useCallback(async (quote: Quote) => {
     const next = await quoteStorage.saveQuote(quote);
     setQuotes(next);
-    const pools = rotationPools(next, collections, deliveryCollectionId, additionalQuotes);
+    const pools = rotationPools(next, collections, deliveryScope, additionalQuotes);
     await reconcileQueue(pools.all);
     // The rotation is already written out for the next fortnight, so without
     // discarding that plan a newly saved quote would not surface until it ran out.
     await resetPlanFrom(dateKey(), pools.all);
     await syncSchedule(pools, notificationTime, additionalQuotes, quoteOrder, soundEnabled);
-  }, [collections, deliveryCollectionId, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+  }, [collections, deliveryScope, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
   const updateCustomQuote = useCallback(async (quote: Quote) => {
     // Only the user's own words are editable; a built-in quote's text is canonical
@@ -146,13 +162,13 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
     if (!isCustomQuote(quote)) return;
     const next = await quoteStorage.updateQuote(quote);
     setQuotes(next);
-    const pools = rotationPools(next, collections, deliveryCollectionId, additionalQuotes);
+    const pools = rotationPools(next, collections, deliveryScope, additionalQuotes);
     // No reconcileQueue: the id set is unchanged. But every planned day still
     // holds the OLD text inside the OS, so the run is discarded and rewritten or
     // the edit would not reach a notification for a fortnight.
     await resetPlanFrom(dateKey(), pools.all);
     await syncSchedule(pools, notificationTime, additionalQuotes, quoteOrder, soundEnabled);
-  }, [collections, deliveryCollectionId, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+  }, [collections, deliveryScope, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
   const removeQuote = useCallback(async (id: string) => {
     const doomed = quotes.find((q) => q.id === id);
@@ -161,7 +177,7 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
     setQuotes(next);
     // Membership is stripped below, but the deleted quote is already absent from
     // `next`, so the pools are correct without waiting for that.
-    const pools = rotationPools(next, collections, deliveryCollectionId, additionalQuotes);
+    const pools = rotationPools(next, collections, deliveryScope, additionalQuotes);
     await reconcileQueue(pools.all);
     // Every planned day still carries the deleted quote's text in the OS, so the
     // whole run is discarded and re-drawn from what is left.
@@ -178,7 +194,7 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
       setLastRemoved(doomed);
       undoTimer.current = setTimeout(() => { removed.current = null; setLastRemoved(undefined); }, UNDO_WINDOW_MS);
     }
-  }, [collections, deliveryCollectionId, quotes, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+  }, [collections, deliveryScope, quotes, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
   const undoRemove = useCallback(async () => {
     const pending = removed.current;
@@ -198,36 +214,36 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
         : c)
       : collections;
     if (pending.collectionIds.length) { setCollections(restored); await quoteStorage.setCollections(restored); }
-    const pools = rotationPools(next, restored, deliveryCollectionId, additionalQuotes);
+    const pools = rotationPools(next, restored, deliveryScope, additionalQuotes);
     await reconcileQueue(pools.all);
     await resetPlanFrom(dateKey(), pools.all);
     await syncSchedule(pools, notificationTime, additionalQuotes, quoteOrder, soundEnabled);
-  }, [clearUndo, collections, deliveryCollectionId, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+  }, [clearUndo, collections, deliveryScope, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
   // Recomputed rather than threaded through every call site, so the settings
   // screen can report what the rotation is actually drawing from.
-  const pools = rotationPools(quotes, collections, deliveryCollectionId, additionalQuotes);
+  const pools = rotationPools(quotes, collections, deliveryScope, additionalQuotes);
 
   const updateNotificationTime = useCallback(async (time: NotificationTime) => {
     await quoteStorage.setNotificationTime(time); setTime(time);
     // Moving the time can move which day the next delivery lands on, so the
     // quote it carries is resolved again rather than reused.
-    await syncSchedule(rotationPools(quotes, collections, deliveryCollectionId, additionalQuotes), time, additionalQuotes, quoteOrder, soundEnabled);
-  }, [additionalQuotes, collections, deliveryCollectionId, quotes, quoteOrder, soundEnabled, syncSchedule]);
+    await syncSchedule(rotationPools(quotes, collections, deliveryScope, additionalQuotes), time, additionalQuotes, quoteOrder, soundEnabled);
+  }, [additionalQuotes, collections, deliveryScope, quotes, quoteOrder, soundEnabled, syncSchedule]);
 
   const updateAdditionalQuotes = useCallback(async (settings: AdditionalQuotesSettings) => {
     await quoteStorage.setAdditionalQuotes(settings); setAdditionalQuotes(settings);
-    const next = rotationPools(quotes, collections, deliveryCollectionId, settings);
+    const next = rotationPools(quotes, collections, deliveryScope, settings);
     // Re-pointing a slot at another collection changes which pool that slot draws
     // from, and the days already planned still hold quotes from the old one, so
     // the committed run is discarded the same way a scope change discards it.
     await resetPlanFrom(dateKey(), next.all);
     await syncSchedule(next, notificationTime, settings, quoteOrder, soundEnabled);
-  }, [notificationTime, collections, deliveryCollectionId, quotes, quoteOrder, soundEnabled, syncSchedule]);
+  }, [notificationTime, collections, deliveryScope, quotes, quoteOrder, soundEnabled, syncSchedule]);
 
-  const updateDeliveryCollection = useCallback(async (id: string | null) => {
-    await quoteStorage.setDeliveryCollection(id); setDeliveryCollectionId(id);
-    const next = rotationPools(quotes, collections, id, additionalQuotes);
+  const updateDeliveryScope = useCallback(async (scope: DeliveryScope) => {
+    await quoteStorage.setDeliveryScope(scope); setDeliveryScope(scope);
+    const next = rotationPools(quotes, collections, scope, additionalQuotes);
     // The cycle is scoped to the pool, so shownIds carried over from the previous
     // scope would mark quotes as already seen that this pool has never delivered
     // — the new collection would start part-way through its first run.
@@ -244,8 +260,8 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
     await quoteStorage.setSoundEnabled(enabled); setSoundEnabled(enabled);
     // Sound is baked into each pending notification, so the already-scheduled
     // ones must be rebuilt or the toggle does nothing until the next launch.
-    await syncSchedule(rotationPools(quotes, collections, deliveryCollectionId, additionalQuotes), notificationTime, additionalQuotes, quoteOrder, enabled);
-  }, [notificationTime, additionalQuotes, collections, deliveryCollectionId, quotes, quoteOrder, syncSchedule]);
+    await syncSchedule(rotationPools(quotes, collections, deliveryScope, additionalQuotes), notificationTime, additionalQuotes, quoteOrder, enabled);
+  }, [notificationTime, additionalQuotes, collections, deliveryScope, quotes, quoteOrder, syncSchedule]);
 
   const clearAllData = useCallback(async () => {
     // Cancel first: if the wipe fails partway, we would rather have dropped the
@@ -256,12 +272,15 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
     // they asked to be rid of.
     clearUndo();
     setQuotes([]); setQuoteOfDay(undefined); setCollections([]);
+    // Every pending notification was just cancelled, so the old runway would be
+    // reporting coverage that no longer exists.
+    setScheduleCoverage(undefined);
     setTime(DEFAULT_NOTIFICATION_TIME);
     setAdditionalQuotes(DEFAULT_EXTRA_QUOTES);
     setQuoteOrder(DEFAULT_QUOTE_ORDER); setSoundEnabled(DEFAULT_SOUND_ENABLED);
-    // The collection it pointed at is gone with everything else, so leaving the
-    // id set would scope delivery to something that no longer exists.
-    setDeliveryCollectionId(null);
+    // Whatever it pointed at is gone with everything else, so leaving the scope
+    // set would narrow delivery to something that no longer exists.
+    setDeliveryScope(ALL_QUOTES);
   }, [clearUndo]);
 
   const addCollection = useCallback(async (name: string): Promise<Collection> => {
@@ -276,29 +295,30 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
    * or as the scope of an extra slot that is currently switched on.
    */
   const drawsFrom = useCallback((collectionId: string): boolean =>
-    collectionId === deliveryCollectionId
-    || additionalQuotes.collectionIds.slice(0, extraSlotCount(additionalQuotes)).includes(collectionId),
-  [deliveryCollectionId, additionalQuotes]);
+    isCollection(deliveryScope, collectionId)
+    || additionalQuotes.scopes.slice(0, extraSlotCount(additionalQuotes)).some((scope) => isCollection(scope, collectionId)),
+  [deliveryScope, additionalQuotes]);
 
   const deleteCollection = useCallback(async (id: string) => {
     const next = collections.filter((c) => c.id !== id);
     setCollections(next); await quoteStorage.setCollections(next);
     const wasScoped = drawsFrom(id);
+    const wasDaily = isCollection(deliveryScope, id);
     // Deleting a collection the rotation drew from widens it back to the whole
     // bank. `deliveryPool` already falls back for a missing id, but the stored
     // references are cleared too, so the settings screen does not keep offering a
     // selection that no longer exists — on the daily scope or on any extra slot.
-    if (id === deliveryCollectionId) { await quoteStorage.setDeliveryCollection(null); setDeliveryCollectionId(null); }
+    if (wasDaily) { await quoteStorage.setDeliveryScope(ALL_QUOTES); setDeliveryScope(ALL_QUOTES); }
     let extras = additionalQuotes;
-    if (additionalQuotes.collectionIds.includes(id)) {
-      extras = { ...additionalQuotes, collectionIds: additionalQuotes.collectionIds.map((c) => c === id ? null : c) };
+    if (additionalQuotes.scopes.some((scope) => isCollection(scope, id))) {
+      extras = { ...additionalQuotes, scopes: additionalQuotes.scopes.map((scope) => isCollection(scope, id) ? null : scope) };
       await quoteStorage.setAdditionalQuotes(extras); setAdditionalQuotes(extras);
     }
     if (!wasScoped) return;
-    const widened = rotationPools(quotes, next, id === deliveryCollectionId ? null : deliveryCollectionId, extras);
+    const widened = rotationPools(quotes, next, wasDaily ? ALL_QUOTES : deliveryScope, extras);
     await resetPlanFrom(dateKey(), widened.all);
     await syncSchedule(widened, notificationTime, extras, quoteOrder, soundEnabled);
-  }, [collections, deliveryCollectionId, drawsFrom, quotes, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+  }, [collections, deliveryScope, drawsFrom, quotes, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
   /**
    * Re-plans when the edited collection is one the rotation draws from, since
@@ -307,11 +327,11 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
    */
   const resyncIfScoped = useCallback(async (collectionId: string, next: Collection[]) => {
     if (!drawsFrom(collectionId)) return;
-    const scoped = rotationPools(quotes, next, deliveryCollectionId, additionalQuotes);
+    const scoped = rotationPools(quotes, next, deliveryScope, additionalQuotes);
     await reconcileQueue(scoped.all);
     await resetPlanFrom(dateKey(), scoped.all);
     await syncSchedule(scoped, notificationTime, additionalQuotes, quoteOrder, soundEnabled);
-  }, [deliveryCollectionId, drawsFrom, quotes, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
+  }, [deliveryScope, drawsFrom, quotes, notificationTime, additionalQuotes, quoteOrder, soundEnabled, syncSchedule]);
 
   const addQuoteToCollection = useCallback(async (quoteId: string, collectionId: string) => {
     const next = collections.map((c) => c.id === collectionId && !c.quoteIds.includes(quoteId) ? { ...c, quoteIds: [...c.quoteIds, quoteId] } : c);
@@ -326,7 +346,7 @@ export function QuoteBankProvider({ children }: PropsWithChildren): ReactElement
   }, [collections, resyncIfScoped]);
 
   return (
-    <QuoteBankContext.Provider value={{ quotes, quoteOfDay, notificationTime, additionalQuotes, collections, loading, saveQuote, updateCustomQuote, removeQuote, lastRemoved, undoRemove, refreshQuoteOfDay, updateNotificationTime, updateAdditionalQuotes, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled, deliveryCollectionId, updateDeliveryCollection, deliveryPool: pools.main, extraPools: pools.extras }}>
+    <QuoteBankContext.Provider value={{ quotes, quoteOfDay, notificationTime, additionalQuotes, collections, loading, saveQuote, updateCustomQuote, removeQuote, lastRemoved, undoRemove, refreshQuoteOfDay, updateNotificationTime, updateAdditionalQuotes, addCollection, deleteCollection, addQuoteToCollection, removeQuoteFromCollection, clearAllData, quoteOrder, updateQuoteOrder, soundEnabled, updateSoundEnabled, deliveryScope, updateDeliveryScope, deliveryPool: pools.main, extraPools: pools.extras, scheduleCoverage }}>
       {children}
     </QuoteBankContext.Provider>
   );
